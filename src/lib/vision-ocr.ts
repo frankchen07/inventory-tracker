@@ -1,16 +1,11 @@
+import type { CatalogItem } from "@/lib/types";
+
 const OPENROUTER_MODEL = "anthropic/claude-opus-4.8";
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 
-export interface InventoryItemRef {
-  inventoryItemId: string;
-  name: string;
-  trackingUnit: string;
-}
-
 export interface OcrLineItem {
-  inventoryItemId: string;
-  reportedQuantity: number | null;
-  reportedUnit: string | null;
+  item: string;
+  reportedQuantityText: string;
   confidence: number;
   ambiguous: boolean;
   notes: string | null;
@@ -21,24 +16,24 @@ export interface OcrResult {
   rawResponse: unknown;
 }
 
-const SYSTEM_PROMPT = `You transcribe a handwritten craft-roastery inventory sheet into structured data. The sheet has one row per supply item: an Item Name, a Quantity, and a Unit (box/sleeve/pack/bag/bottle/roll/tank/individual).
+const SYSTEM_PROMPT = `You transcribe a handwritten inventory count sheet into structured data. The sheet has one row per supply item, each with a quantity written in the owner's own shorthand — not a plain number.
 
-Quantities are often fractional, written as "1/4", "1 3/4", "1½", etc. Convert these directly to decimals in your output (0.25, 1.75, 1.5) — do not report fractions as strings.
+Transcribe each quantity EXACTLY as the owner would write it themselves, matching the style of these real examples: "1.75 boxes", "2 boxes", "4 sleeves", "0.25 boxes", "1 box and 6 sleeves", "3 full packs", "0.5 pack", "26 growlers". Use decimals for fractions written as "1/4", "1 3/4", etc. (0.25, 1.75). If the sheet mixes two units for one item (e.g. a full box plus a partial sleeve), write both joined with "and", e.g. "1 box and 6 sleeves". Always lowercase.
 
-"confidence" is an integer from 0 (no idea) to 100 (certain). Handwriting is often ambiguous — crossed-out digits, stacked numbers, unclear fractions. When you are not fully certain of a value, still give your best reading, set "ambiguous": true, set "confidence" below 70, and use "notes" to record what the ambiguity is (e.g. "could be 1/4 or 1/2", "digit crossed out, reading second attempt"). Also flag "ambiguous": true if the unit written on the sheet doesn't match the item's known unit, and explain the mismatch in "notes".
+"confidence" is an integer 0 (no idea) to 100 (certain). Handwriting is often ambiguous — crossed-out digits, stacked numbers, unclear fractions. When not fully certain, still give your best reading, set "ambiguous": true, confidence below 70, and use "notes" to explain (e.g. "could be 1/4 or 1/2"). Also set "ambiguous": true whenever the sheet gives a bare number with no unit at all (e.g. just "6" or "12") — note what unit you're guessing at, since that's a real gap for a human to resolve, not just low confidence.
 
-Only report a line item for inventory items that appear in the known list you were given, using the exact inventoryItemId values provided — do not invent new items. If an item's row is genuinely blank (not counted), still include it with reportedQuantity: null, confidence: 100.`;
+Only report a line item for items in the known list you were given, using the exact item name provided — do not invent new items or rename them. If an item's row is genuinely blank or not on the sheet at all, still include it with reportedQuantityText: "" and confidence: 100 — that means "not recounted this time," which is meaningfully different from a low reading.`;
 
-function buildUserPrompt(items: InventoryItemRef[]): string {
+function buildUserPrompt(items: CatalogItem[]): string {
   const list = items
-    .map((item) => `- inventoryItemId="${item.inventoryItemId}": ${item.name} (unit: ${item.trackingUnit})`)
+    .map((item) => `- ${item.item} (packaging: ${item.unitConversion || "unspecified"})`)
     .join("\n");
 
-  return `Here is a photo of today's inventory count sheet. The known items for this roastery are:
+  return `Here is a photo of today's inventory count sheet. The known items for this shop are:
 
 ${list}
 
-Extract one line item per known item above. reportedQuantity should be a decimal number (e.g. 1.75 for "1 3/4"), or null if the row is blank. reportedUnit should be the unit written on the sheet next to that item, or null if none was written.`;
+Extract one line item per known item above, with reportedQuantityText written in the owner's shorthand as described.`;
 }
 
 const RESPONSE_SCHEMA = {
@@ -49,21 +44,13 @@ const RESPONSE_SCHEMA = {
       items: {
         type: "object",
         properties: {
-          inventoryItemId: { type: "string" },
-          reportedQuantity: { anyOf: [{ type: "number" }, { type: "null" }] },
-          reportedUnit: { anyOf: [{ type: "string" }, { type: "null" }] },
+          item: { type: "string" },
+          reportedQuantityText: { type: "string" },
           confidence: { type: "integer" },
           ambiguous: { type: "boolean" },
           notes: { anyOf: [{ type: "string" }, { type: "null" }] },
         },
-        required: [
-          "inventoryItemId",
-          "reportedQuantity",
-          "reportedUnit",
-          "confidence",
-          "ambiguous",
-          "notes",
-        ],
+        required: ["item", "reportedQuantityText", "confidence", "ambiguous", "notes"],
         additionalProperties: false,
       },
     },
@@ -75,7 +62,7 @@ const RESPONSE_SCHEMA = {
 export async function extractInventoryFromPhoto(
   imageBase64: string,
   mediaType: "image/jpeg" | "image/png" | "image/webp",
-  items: InventoryItemRef[],
+  items: CatalogItem[],
 ): Promise<OcrResult> {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) {
@@ -141,12 +128,12 @@ export async function extractInventoryFromPhoto(
     );
   }
 
-  const knownIds = new Set(items.map((item) => item.inventoryItemId));
-  const lineItems = parsed.lineItems.filter((li) => knownIds.has(li.inventoryItemId));
+  const knownNames = new Set(items.map((item) => item.item));
+  const lineItems = parsed.lineItems.filter((li) => knownNames.has(li.item));
   const droppedCount = parsed.lineItems.length - lineItems.length;
   if (droppedCount > 0) {
     console.warn(
-      `extractInventoryFromPhoto: dropped ${droppedCount} line item(s) with unrecognized inventoryItemId — the model may have read an item name that doesn't match the known catalog.`,
+      `extractInventoryFromPhoto: dropped ${droppedCount} line item(s) with unrecognized item name — the model may have read a name that doesn't match the known catalog.`,
     );
   }
 

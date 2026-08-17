@@ -1,48 +1,43 @@
-export const TRACKING_UNITS = [
-  "box",
-  "sleeve",
-  "pack",
-  "bag",
-  "bottle",
-  "roll",
-  "tank",
-  "individual",
-] as const;
-export type TrackingUnit = (typeof TRACKING_UNITS)[number];
-
-export interface InventoryItem {
-  id: string;
-  name: string;
+// Sheet1's fixed catalog columns (A-E). Items are keyed by name — Sheet1 has
+// no id column.
+export interface CatalogItem {
+  item: string;
   category: string;
-  trackingUnit: TrackingUnit;
-  unitsPerContainer: number | null;
-  currentQuantity: number;
-  reorderThreshold: number;
-  purchaseLocation: string;
-  lastCountedAt: string | null;
+  supplier: string;
+  unitConversion: string;
+  threshold: string;
 }
 
-export const SCAN_STATUSES = ["draft", "confirmed"] as const;
-export type ScanStatus = (typeof SCAN_STATUSES)[number];
-
-export interface Scan {
-  id: string;
-  scanDate: string;
-  photoUrl: string | null;
-  ocrRawJson: string | null;
-  status: ScanStatus;
-  reviewedBy: string | null;
-  reviewedAt: string | null;
-  createdAt: string;
+// A catalog item currently below its threshold.
+export interface RestockItem {
+  item: string;
+  supplier: string;
+  remaining: string;
+  remainingAtomic: number;
+  thresholdAtomic: number;
 }
 
-export interface ScanLineItem {
-  id: string;
-  scanId: string;
-  inventoryItemId: string;
-  reportedQuantity: number | null;
-  reportedUnit: string | null;
+// A catalog item with a recorded count that couldn't be converted to a
+// number (e.g. a bare "6" with no unit) — status unknown, not "in stock."
+export interface NeedsReviewItem {
+  item: string;
+  supplier: string;
+  countText: string;
+}
+
+export interface ScanDraftLineItem {
+  item: string;
+  reportedQuantityText: string;
   confidence: number;
   ambiguous: boolean;
   notes: string | null;
+}
+
+// In-progress OCR result, stored as a Blob JSON object between upload and
+// confirm — never written to Sheet1 until confirmed.
+export interface ScanDraft {
+  id: string;
+  scanDate: string;
+  photoUrl: string;
+  lineItems: ScanDraftLineItem[];
 }

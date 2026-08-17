@@ -29,8 +29,8 @@ export function UploadForm({ defaultDate }: { defaultDate: string }) {
       if (!res.ok) {
         throw new Error((await res.json()).error ?? "could not process sheet");
       }
-      const { scanId } = await res.json();
-      router.push(`/scans/${scanId}/confirm`);
+      const { draftId } = await res.json();
+      router.push(`/scans/${draftId}/confirm`);
     } catch (err) {
       setStatus("error");
       setError(err instanceof Error ? err.message : "Upload failed");

@@ -6,8 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint",
-    "init-sheet": "dotenv -e .env.local -- tsx scripts/init-sheet.ts"
+    "lint": "eslint"
   },
   "dependencies": {
     "@vercel/blob": "^2.8.0",

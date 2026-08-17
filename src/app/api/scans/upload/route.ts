@@ -1,8 +1,8 @@
 import { randomUUID } from "crypto";
 import { NextResponse } from "next/server";
-import { uploadScanPhoto } from "@/lib/blob-storage";
-import { appendScanLineItem, createScan, getInventoryItems } from "@/lib/inventory";
-import { extractInventoryFromPhoto, type InventoryItemRef } from "@/lib/vision-ocr";
+import { uploadScanDraft, uploadScanPhoto } from "@/lib/blob-storage";
+import { getCatalog } from "@/lib/inventory";
+import { extractInventoryFromPhoto } from "@/lib/vision-ocr";
 
 const ALLOWED_MEDIA_TYPES: Record<string, string> = {
   "image/jpeg": "jpg",
@@ -28,41 +28,23 @@ export async function POST(request: Request) {
 
   const bytes = Buffer.from(await photo.arrayBuffer());
 
-  const inventoryItems = await getInventoryItems();
-  const itemRefs: InventoryItemRef[] = inventoryItems.map((item) => ({
-    inventoryItemId: item.id,
-    name: item.name,
-    trackingUnit: item.trackingUnit,
-  }));
+  const catalog = await getCatalog();
 
-  const { lineItems, rawResponse } = await extractInventoryFromPhoto(
+  const { lineItems } = await extractInventoryFromPhoto(
     bytes.toString("base64"),
     photo.type as "image/jpeg" | "image/png" | "image/webp",
-    itemRefs,
+    catalog,
   );
 
   const photoUrl = await uploadScanPhoto(`${scanDate}-${Date.now()}.${ext}`, bytes, photo.type);
 
-  const scanId = randomUUID();
-  await createScan({
-    id: scanId,
+  const draftId = randomUUID();
+  await uploadScanDraft({
+    id: draftId,
     scanDate,
     photoUrl,
-    ocrRawJson: JSON.stringify(rawResponse),
+    lineItems,
   });
 
-  for (const item of lineItems) {
-    await appendScanLineItem({
-      id: randomUUID(),
-      scanId,
-      inventoryItemId: item.inventoryItemId,
-      reportedQuantity: item.reportedQuantity,
-      reportedUnit: item.reportedUnit,
-      confidence: item.confidence,
-      ambiguous: item.ambiguous,
-      notes: item.notes,
-    });
-  }
-
-  return NextResponse.json({ scanId });
+  return NextResponse.json({ draftId });
 }

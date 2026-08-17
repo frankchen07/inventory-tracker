@@ -1,20 +1,38 @@
 import Link from "next/link";
-import { getInventoryItems, isLowStock } from "@/lib/inventory";
+import { computeRestockList, getCatalog } from "@/lib/inventory";
+import { getLatestDateColumn } from "@/lib/sheets";
+import type { RestockItem } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
-  const items = await getInventoryItems();
-  const sorted = [...items].sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name));
-  const lowCount = items.filter(isLowStock).length;
+  const [catalog, { lowStock, needsReview }, latestDate] = await Promise.all([
+    getCatalog(),
+    computeRestockList(),
+    getLatestDateColumn(),
+  ]);
+
+  const sheetUrl = `https://docs.google.com/spreadsheets/d/${process.env.GOOGLE_SHEETS_SPREADSHEET_ID}/edit`;
+
+  const byLocation = new Map<string, RestockItem[]>();
+  for (const item of lowStock) {
+    const key = item.supplier || "Unspecified";
+    const group = byLocation.get(key) ?? [];
+    group.push(item);
+    byLocation.set(key, group);
+  }
+  const locations = [...byLocation.keys()].sort((a, b) => a.localeCompare(b));
 
   return (
-    <main className="mx-auto max-w-5xl px-4 py-8">
+    <main className="mx-auto max-w-3xl px-4 py-8">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-xl font-semibold text-zinc-900">Inventory Dashboard</h1>
           <p className="mt-1 text-sm text-zinc-500">
-            {items.length} items tracked · {lowCount} low stock
+            {latestDate
+              ? `Based on latest data on ${latestDate.date}, `
+              : "No counts recorded yet — "}
+            {catalog.length} items tracked · {lowStock.length} low stock · {needsReview.length} need review
           </p>
         </div>
         <div className="flex gap-2">
@@ -24,72 +42,55 @@ export default async function DashboardPage() {
           >
             Scan inventory
           </Link>
-          <Link
-            href="/restock"
+          <a
+            href={sheetUrl}
+            target="_blank"
+            rel="noopener noreferrer"
             className="rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
           >
-            Restock list
-          </Link>
-          <Link
-            href="/scans"
-            className="rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
-          >
-            Scan history
-          </Link>
+            Open Google Sheet
+          </a>
         </div>
       </div>
 
-      <div className="mt-6 overflow-x-auto rounded-lg border border-zinc-200">
-        <table className="w-full min-w-[720px] text-sm">
-          <thead className="bg-zinc-50 text-left text-xs uppercase tracking-wide text-zinc-500">
-            <tr>
-              <th className="px-3 py-2">Item</th>
-              <th className="px-3 py-2">Category</th>
-              <th className="px-3 py-2">Current</th>
-              <th className="px-3 py-2">Threshold</th>
-              <th className="px-3 py-2">Status</th>
-              <th className="px-3 py-2">Last counted</th>
-              <th className="px-3 py-2">Buy from</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-zinc-100">
-            {sorted.map((item) => {
-              const low = isLowStock(item);
-              return (
-                <tr key={item.id}>
-                  <td className="px-3 py-2 whitespace-nowrap text-zinc-900">{item.name}</td>
-                  <td className="px-3 py-2 whitespace-nowrap text-zinc-500">{item.category}</td>
-                  <td className="px-3 py-2 whitespace-nowrap">
-                    {item.currentQuantity} {item.trackingUnit}
-                    {item.unitsPerContainer !== null && (
-                      <span className="text-zinc-400">
-                        {" "}
-                        (≈ {Math.round(item.currentQuantity * item.unitsPerContainer)} individual)
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-3 py-2 whitespace-nowrap text-zinc-500">
-                    {item.reorderThreshold} {item.trackingUnit}
-                  </td>
-                  <td className="px-3 py-2 whitespace-nowrap">
-                    <span
-                      className={`rounded px-2 py-0.5 text-xs font-medium ${
-                        low ? "bg-red-100 text-red-800" : "bg-green-100 text-green-800"
-                      }`}
-                    >
-                      {low ? "LOW" : "OK"}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2 whitespace-nowrap text-zinc-500">
-                    {item.lastCountedAt ? item.lastCountedAt.slice(0, 10) : "never"}
-                  </td>
-                  <td className="px-3 py-2 whitespace-nowrap text-zinc-500">{item.purchaseLocation}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+      <div className="mt-6 flex flex-col gap-6">
+        {lowStock.length === 0 && (
+          <p className="text-sm text-zinc-500">Nothing needs restocking right now.</p>
+        )}
+        {locations.map((location) => (
+          <div key={location} className="rounded-lg border border-zinc-200">
+            <h2 className="border-b border-zinc-200 bg-zinc-50 px-4 py-2 text-sm font-semibold text-zinc-900">
+              {location}
+            </h2>
+            <ul className="divide-y divide-zinc-100">
+              {byLocation.get(location)!.map((item) => (
+                <li key={item.item} className="flex items-center justify-between px-4 py-2 text-sm">
+                  <span className="text-zinc-900">{item.item}</span>
+                  <span className="text-zinc-500">{item.remaining} remaining</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
       </div>
+
+      {needsReview.length > 0 && (
+        <div className="mt-8 rounded-lg border border-amber-200">
+          <h2 className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-900">
+            Needs review — couldn&apos;t read units ({needsReview.length})
+          </h2>
+          <ul className="divide-y divide-amber-100">
+            {needsReview.map((item) => (
+              <li key={item.item} className="flex items-center justify-between px-4 py-2 text-sm">
+                <span className="text-zinc-900">{item.item}</span>
+                <span className="text-zinc-500">
+                  couldn&apos;t read units from &quot;{item.countText}&quot; — fix in the sheet
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </main>
   );
 }
