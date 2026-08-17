@@ -1,6 +1,6 @@
 // Parses the free-text `unit conversion`, `threshold`, and reported-quantity
-// cells on Sheet1. These are hand-written by Frank, not structured data — the
-// patterns here are reverse-engineered from the real rows in Sheet1, not a
+// cells on the "inventory" sheet. These are hand-written by Frank, not structured data — the
+// patterns here are reverse-engineered from the real rows in the "inventory" sheet, not a
 // general-purpose grammar. If a new phrasing shows up, extend the patterns
 // below rather than trying to generalize preemptively.
 

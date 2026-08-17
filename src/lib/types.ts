@@ -1,5 +1,5 @@
-// Sheet1's fixed catalog columns (A-E). Items are keyed by name — Sheet1 has
-// no id column.
+// The "inventory" sheet's fixed catalog columns (A-E). Items are keyed by
+// name — the sheet has no id column.
 export interface CatalogItem {
   item: string;
   category: string;
@@ -34,7 +34,7 @@ export interface ScanDraftLineItem {
 }
 
 // In-progress OCR result, stored as a Blob JSON object between upload and
-// confirm — never written to Sheet1 until confirmed.
+// confirm — never written to the "inventory" sheet until confirmed.
 export interface ScanDraft {
   id: string;
   scanDate: string;

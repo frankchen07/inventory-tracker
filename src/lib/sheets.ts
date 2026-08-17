@@ -2,17 +2,17 @@ import { google, sheets_v4 } from "googleapis";
 
 const SPREADSHEET_ID = process.env.GOOGLE_SHEETS_SPREADSHEET_ID!;
 
-// Sheet1 is the single source of truth: columns A-E are the fixed catalog
-// (item, category, supplier, unit conversion, threshold), and every column
-// from F onward is a date-headered count column, oldest to newest left to
-// right. There is no separate scan/history tab — a confirmed count *is* a
-// new column here.
-export const CATALOG_SHEET = "Sheet1";
+// "inventory" is the single source of truth: columns A-E are the fixed
+// catalog (item, category, supplier, unit conversion, threshold), and every
+// column from F onward is a date-headered count column, oldest to newest
+// left to right. There is no separate scan/history tab — a confirmed count
+// *is* a new column here.
+export const CATALOG_SHEET = "inventory";
 export const CATALOG_HEADERS = ["item", "category", "supplier", "unitConversion", "threshold"] as const;
 
 // Lightweight receipt linking a count date to its source photo — not an
 // audit log, just enough to go check the original photo if a number looks off.
-export const SCAN_PHOTOS_SHEET = "Scan Photos";
+export const SCAN_PHOTOS_SHEET = "scan photos";
 export const SCAN_PHOTOS_HEADERS = ["date", "photoUrl"] as const;
 
 let client: sheets_v4.Sheets | null = null;

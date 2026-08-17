@@ -14,7 +14,7 @@ export async function uploadScanPhoto(
 }
 
 // In-progress OCR result, stored between upload and confirm — never written
-// to Sheet1 until the user actually confirms. Uses a fixed pathname (no
+// to the "inventory" sheet until the user actually confirms. Uses a fixed pathname (no
 // random suffix) so it can be looked up later by draft id alone.
 export async function uploadScanDraft(draft: ScanDraft): Promise<void> {
   await put(`scan-drafts/${draft.id}.json`, JSON.stringify(draft), {
