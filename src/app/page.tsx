@@ -35,22 +35,29 @@ export default async function DashboardPage() {
             {catalog.length} items tracked · {lowStock.length} low stock · {needsReview.length} need review
           </p>
         </div>
-        <div className="flex gap-2">
-          <Link
-            href="/scans/upload"
-            className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700"
-          >
-            Scan inventory
-          </Link>
-          <a
-            href={sheetUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
-          >
-            Open Google Sheet
-          </a>
-        </div>
+        <Link
+          href="/production"
+          className="rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
+        >
+          Production
+        </Link>
+      </div>
+
+      <div className="mt-4 flex gap-2">
+        <Link
+          href="/scans/upload"
+          className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700"
+        >
+          Scan inventory
+        </Link>
+        <a
+          href={sheetUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
+        >
+          Open Google Sheet
+        </a>
       </div>
 
       <div className="mt-6 flex flex-col gap-6">
