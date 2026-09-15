@@ -1,36 +1,81 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Inventory Tracker
 
-## Getting Started
+A small Next.js app for tracking coffee-shop inventory and weekly production, backed entirely
+by a Google Sheet (no database) via a service account.
 
-First, run the development server:
+## Setup
+
+Copy `.env.local` (not committed) with:
+
+- `GOOGLE_SHEETS_SPREADSHEET_ID` — the sheet this app reads/writes.
+- `GOOGLE_SERVICE_ACCOUNT_EMAIL` / `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY` — a Google service
+  account with edit access to that sheet.
+- `APP_PASSPHRASE` — single shared passphrase gating the whole app (see `/login`).
+- `BLOB_READ_WRITE_TOKEN` — Vercel Blob, used to store uploaded scan photos.
+- `OPENROUTER_API_KEY` — used to OCR a photographed count sheet on upload.
+- `MCP_ACCESS_TOKEN` — bearer token gating `/api/mcp` (see below).
+
+Then:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## The sheet
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Six tabs, each a flat table with a header row (no numeric IDs — everything is keyed by name):
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- **inventory** — the purchased-goods catalog (item, category, supplier, unit conversion,
+  threshold), plus one date column per physical count, oldest to newest.
+- **scan photos** — links a count date back to the photo it was OCR'd from.
+- **recipes** — batch processes (brewing, roasting, etc.) and their oz yield per batch.
+- **products** — the countable units you actually order/reserve (a bottle, a keg, a bag size),
+  each pointing at the one recipe it's filled from.
+- **standing orders** / **orders** — recurring weekly demand and one-off dated demand.
+- **reserve stock** — target on-hand levels for whichever products or recipes you keep a
+  buffer of, shaped like `inventory` (fixed columns + one date column per physical count).
 
-## Learn More
+## Using it
 
-To learn more about Next.js, take a look at the following resources:
+- **`/`** — inventory dashboard: what's low stock, what needs review (a count that couldn't be
+  parsed), link to the raw sheet.
+- **`/scans/upload`** — photograph a filled-in inventory count sheet; OCR drafts the numbers,
+  you review and confirm before anything is written back to `inventory`.
+- **`/production`** — this week's plan: what's needed for the Wed–Sat popup/deliveries, current
+  reserve levels, and what to brew/roast/make Mon/Tue to cover it. Always computed off *this*
+  calendar week — reopening it later in the week doesn't change what window it's planning for.
+- **`/production/reserve-count`** — log a physical count of reserve stock (kegs, buckets,
+  bottles on hand); leave an entity blank if you didn't recount it and its last count carries
+  forward, same as inventory counts.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Editing `recipes`/`products`/`standing orders`/`reserve stock` directly in the sheet is expected
+day-to-day — the app never needs a code change for a new product or a renamed recipe, only
+self-consistent data across the tabs.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Claude.ai connector (MCP)
 
-## Deploy on Vercel
+`/api/mcp` is a [Model Context Protocol](https://modelcontextprotocol.io) server (built with
+[`mcp-handler`](https://www.npmjs.com/package/mcp-handler)) that lets a Claude.ai conversation —
+including voice dictation — write inventory counts straight to the `inventory` sheet, without
+going through Anthropic's separate Autosheet feature or its credit limits.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+It exposes one tool, `record_inventory_count(date?, counts: {item, count}[])`, which matches each
+`item` against the live catalog (case-insensitive) and calls the same `writeCountColumn` used by
+the photo-scan-confirm flow — so counted items land in a dated column and everything else carries
+forward, same semantics either way. Unrecognized item names are reported back instead of guessed.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+The route enforces its own auth (a bearer token checked against `MCP_ACCESS_TOKEN`) rather than
+the app's cookie-based passphrase gate, since an MCP client can't hold a browser cookie —
+`src/proxy.ts`'s middleware matcher excludes `api/mcp` for this reason, same as it already does
+for `api/login`.
+
+**Connecting it in Claude.ai** (Settings → Connectors → Add custom connector):
+
+- **MCP server URL**: the deployed app's `/api/mcp` endpoint.
+- **Authentication**: **No sign-in** — this server isn't an OAuth provider, just a static token.
+  (If you pick "Sign in now"/"Sign in when needed" instead, Claude reserves the `Authorization`
+  header for its own OAuth flow and won't let you set it manually.)
+- **Request headers**: add header `Authorization`, value `Bearer <MCP_ACCESS_TOKEN>`.
+
+Request-header auth is currently in beta and gated per Claude.ai organization — if the **Request
+headers** section doesn't show up in the dialog, it isn't enabled for your account yet.
