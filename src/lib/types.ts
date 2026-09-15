@@ -147,9 +147,10 @@ export interface ProductRequirement {
   totalQty: number;
 }
 
-// windowStart/windowEnd are the Wed/Sat dates of the current brew week's
-// delivery window (see production.ts) — there's no longer a single "the
-// date" this plan is for, since demand is aggregated across the whole week.
+// windowStart/windowEnd are a rolling ~9-day capture window starting today
+// (see production.ts), not a fixed calendar-week range — there's no single
+// "the date" this plan is for, since demand is aggregated across the whole
+// window.
 export interface ProductionPlan {
   windowStart: string;
   windowEnd: string;

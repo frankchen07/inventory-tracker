@@ -72,7 +72,7 @@ export default async function ProductionPage() {
         <div>
           <h1 className="text-xl font-semibold text-zinc-900">Production</h1>
           <p className="mt-1 text-sm text-zinc-500">
-            Covers deliveries {formatDayLabel(plan.windowStart)} &ndash; {formatDayLabel(plan.windowEnd)}
+            Covers orders through {formatDayLabel(plan.windowEnd)}
           </p>
         </div>
         <Link
@@ -125,7 +125,14 @@ export default async function ProductionPage() {
               <li key={`${line.customer}-${line.product}-${i}`} className="flex items-center justify-between px-4 py-2 text-sm">
                 <span className="text-zinc-900">{line.customer}</span>
                 <span className="text-zinc-500">
-                  {line.quantity} &times; {line.product} <span className="text-zinc-400">({ceilDisplay(line.oz)} oz)</span>{" "}
+                  {line.quantityUnit === "oz" ? (
+                    <>{line.product} - {ceilDisplay(line.oz)} oz</>
+                  ) : (
+                    <>
+                      {line.quantity} &times; {line.product}{" "}
+                      <span className="text-zinc-400">({ceilDisplay(line.oz)} oz)</span>
+                    </>
+                  )}{" "}
                   <span className="text-zinc-400">({formatDayLabel(line.forDate)})</span>
                 </span>
               </li>

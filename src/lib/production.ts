@@ -156,10 +156,17 @@ export async function writeReserveCountColumn(date: string, valuesByEntity: Map<
 }
 
 // Standing orders whose dayOfWeek falls in the Wed-Sat window (mapped to a
-// concrete date via its offset from windowStart), plus one-off orders whose
-// date falls anywhere within [windowStart, windowEnd]. Every line carries
-// forDate so the UI can group deliveries by day.
-export async function getDemandForWindow(windowStart: string, windowEnd: string): Promise<DemandLine[]> {
+// concrete date via its offset from popupWeekStart, always this calendar
+// week's Wednesday — standing demand only ever happens Wed-Sat, so this
+// anchor stays fixed regardless of how wide the capture window itself is),
+// plus one-off orders whose date falls anywhere within [windowStart,
+// windowEnd]. Every line carries forDate so the UI can group deliveries by
+// day.
+export async function getDemandForWindow(
+  popupWeekStart: string,
+  windowStart: string,
+  windowEnd: string,
+): Promise<DemandLine[]> {
   const [standing, oneOff] = await Promise.all([getStandingOrders(), getOneOffOrders()]);
 
   const demand: DemandLine[] = [];
@@ -172,7 +179,7 @@ export async function getDemandForWindow(windowStart: string, windowEnd: string)
       product: order.product,
       quantity: order.quantity,
       quantityUnit: order.quantityUnit,
-      forDate: addDays(windowStart, dayIndex),
+      forDate: addDays(popupWeekStart, dayIndex),
       channel: order.channel,
       oz: 0, // filled in by computeProductionPlan() once product sizes are known
     });
@@ -195,24 +202,33 @@ export async function getDemandForWindow(windowStart: string, windowEnd: string)
 }
 
 // Resolves each demand line to its recipe via `products.source`, sums the
-// total recipe quantity needed across the whole Wed-Sat delivery window,
-// folds in any reserve-level shortfall (evaluated independent of orders — a
-// low reserve tops up production even with zero orders), then converts each
-// recipe's total to whole batches. This is a flat sum, not a chain — a
-// product's demand and a reserve entity's top-up each land directly on a
-// recipe with no netting between them (e.g. nitro keg orders and the
-// concentrate reserve's own top-up are independent asks, even though
-// physically they'd draw from the same brew — see the plan doc for why that
-// trade-off is accepted). Demand lines for a product with no matching
-// `products` row are left out of the batch totals but still show up in
-// `demand`.
+// total recipe quantity needed across the whole capture window, folds in any
+// reserve-level shortfall (evaluated independent of orders — a low reserve
+// tops up production even with zero orders), then converts each recipe's
+// total to whole batches. This is a flat sum, not a chain — a product's
+// demand and a reserve entity's top-up each land directly on a recipe with
+// no netting between them (e.g. nitro keg orders and the concentrate
+// reserve's own top-up are independent asks, even though physically they'd
+// draw from the same brew — see the plan doc for why that trade-off is
+// accepted). Demand lines for a product with no matching `products` row are
+// left out of the batch totals but still show up in `demand`.
+//
+// windowStart/windowEnd are a rolling ~9-day capture window starting today
+// (not tied to the calendar week) — wide enough that an order due early next
+// week is already visible today, with enough lead time to brew/roast for it
+// during this week's Mon/Tue production slot. Standing orders still map onto
+// this calendar week's actual Wed-Sat dates via the separate popupWeekStart
+// anchor, so they never double up even though the capture window is wider
+// than one Wed-Sat block.
 export async function computeProductionPlan(): Promise<ProductionPlan> {
-  const monday = mondayOfWeek(todayISO());
-  const windowStart = addDays(monday, 2);
-  const windowEnd = addDays(monday, 5);
+  const today = todayISO();
+  const monday = mondayOfWeek(today);
+  const popupWeekStart = addDays(monday, 2);
+  const windowStart = today;
+  const windowEnd = addDays(today, 8);
 
   const [demand, recipes, products, stockEntities, latestStock] = await Promise.all([
-    getDemandForWindow(windowStart, windowEnd),
+    getDemandForWindow(popupWeekStart, windowStart, windowEnd),
     getRecipes(),
     getProducts(),
     getProductionStockEntities(),
