@@ -92,13 +92,50 @@ export async function getStandingOrders(): Promise<StandingOrder[]> {
   const rows = await readRows(STANDING_ORDERS_SHEET, STANDING_ORDERS_HEADERS);
   return rows.map((r) => ({
     customer: r.customer,
-    product: r.product,
+    item: r.item,
     quantity: Number(r.quantity) || 0,
     quantityUnit: parseQuantityUnit(r.quantityUnit),
     dayOfWeek: r.dayOfWeek,
     active: r.active.trim().toUpperCase() === "TRUE",
     channel: r.channel.trim().toLowerCase() === "popup" ? "popup" : "client",
+    intervalWeeks: Number(r.intervalWeeks) || 1,
+    anchorDate: r.anchorDate.trim(),
   }));
+}
+
+// Whether a standing order's cadence puts it "in phase" for the calendar
+// week containing popupWeekStart. intervalWeeks <= 1 (weekly, or a
+// blank/garbage value), a blank anchorDate, and an anchorDate that doesn't
+// parse to a real date (typo, wrong format) all short-circuit to always due
+// — see StandingOrder in types.ts for why a missing/unusable anchor fails
+// open instead of silently dropping the order.
+function isDueThisWeek(order: StandingOrder, popupWeekStart: string): boolean {
+  if (order.intervalWeeks <= 1 || !order.anchorDate) return true;
+  const anchorMonday = mondayOfWeek(order.anchorDate);
+  const thisMonday = mondayOfWeek(popupWeekStart);
+  const weeksSince = Math.round(
+    (parseDate(thisMonday).getTime() - parseDate(anchorMonday).getTime()) / (7 * 86400000),
+  );
+  if (Number.isNaN(weeksSince)) return true;
+  return ((weeksSince % order.intervalWeeks) + order.intervalWeeks) % order.intervalWeeks === 0;
+}
+
+// Builds one standing order's demand line against a specific week's
+// Wednesday (weekStart) — used both for this week's real demand and for
+// next week's look-ahead notice, so the two never drift apart in shape.
+// Returns null if dayOfWeek doesn't match anything in the Wed-Sat window.
+function standingOrderDemandLine(order: StandingOrder, weekStart: string): DemandLine | null {
+  const dayIndex = WINDOW_DAYS.findIndex((d) => d.toLowerCase() === order.dayOfWeek.trim().toLowerCase());
+  if (dayIndex === -1) return null;
+  return {
+    customer: order.customer,
+    item: order.item,
+    quantity: order.quantity,
+    quantityUnit: order.quantityUnit,
+    forDate: addDays(weekStart, dayIndex),
+    channel: order.channel,
+    oz: 0, // filled in by fillOz() once product sizes are known
+  };
 }
 
 export async function getOneOffOrders(): Promise<OneOffOrder[]> {
@@ -106,7 +143,7 @@ export async function getOneOffOrders(): Promise<OneOffOrder[]> {
   return rows.map((r) => ({
     date: r.date,
     customer: r.customer,
-    product: r.product,
+    item: r.item,
     quantity: Number(r.quantity) || 0,
     quantityUnit: parseQuantityUnit(r.quantityUnit),
     notes: r.notes,
@@ -155,40 +192,36 @@ export async function writeReserveCountColumn(date: string, valuesByEntity: Map<
   await writeColumnValues(colIndex, values, RESERVE_STOCK_SHEET);
 }
 
-// Standing orders whose dayOfWeek falls in the Wed-Sat window (mapped to a
-// concrete date via its offset from popupWeekStart, always this calendar
-// week's Wednesday — standing demand only ever happens Wed-Sat, so this
-// anchor stays fixed regardless of how wide the capture window itself is),
-// plus one-off orders whose date falls anywhere within [windowStart,
-// windowEnd]. Every line carries forDate so the UI can group deliveries by
-// day.
-export async function getDemandForWindow(
+// Standing orders that are active, in-phase for this week (isDueThisWeek —
+// always true for weekly orders), and whose dayOfWeek falls in the Wed-Sat
+// window (mapped to a concrete date via its offset from popupWeekStart,
+// always this calendar week's Wednesday — standing demand only ever happens
+// Wed-Sat, so this anchor stays fixed regardless of how wide the capture
+// window itself is), plus one-off orders whose date falls anywhere within
+// [windowStart, windowEnd]. Every line carries forDate so the UI can group
+// deliveries by day. `standing`/`oneOff` are passed in (rather than fetched
+// here) so computeProductionPlan() can fetch every sheet exactly once, in
+// parallel, and share the standing-orders list with
+// getUpcomingStandingDemand() instead of reading that tab twice.
+export function getDemandForWindow(
+  standing: StandingOrder[],
+  oneOff: OneOffOrder[],
   popupWeekStart: string,
   windowStart: string,
   windowEnd: string,
-): Promise<DemandLine[]> {
-  const [standing, oneOff] = await Promise.all([getStandingOrders(), getOneOffOrders()]);
-
+): DemandLine[] {
   const demand: DemandLine[] = [];
   for (const order of standing) {
     if (!order.active) continue;
-    const dayIndex = WINDOW_DAYS.findIndex((d) => d.toLowerCase() === order.dayOfWeek.trim().toLowerCase());
-    if (dayIndex === -1) continue;
-    demand.push({
-      customer: order.customer,
-      product: order.product,
-      quantity: order.quantity,
-      quantityUnit: order.quantityUnit,
-      forDate: addDays(popupWeekStart, dayIndex),
-      channel: order.channel,
-      oz: 0, // filled in by computeProductionPlan() once product sizes are known
-    });
+    if (!isDueThisWeek(order, popupWeekStart)) continue;
+    const line = standingOrderDemandLine(order, popupWeekStart);
+    if (line) demand.push(line);
   }
   for (const order of oneOff) {
     if (order.date >= windowStart && order.date <= windowEnd) {
       demand.push({
         customer: order.customer,
-        product: order.product,
+        item: order.item,
         quantity: order.quantity,
         quantityUnit: order.quantityUnit,
         forDate: order.date,
@@ -199,6 +232,29 @@ export async function getDemandForWindow(
   }
   demand.sort((a, b) => a.forDate.localeCompare(b.forDate) || a.customer.localeCompare(b.customer));
   return demand;
+}
+
+// Non-weekly (intervalWeeks > 1) standing orders due *next* calendar week —
+// purely informational, e.g. so a triweekly keg customer's delivery shows up
+// a week ahead of time to leave lead time for ordering extra supplies.
+// Deliberately excludes weekly orders (business as usual, no notice needed)
+// and never feeds computeProductionPlan()'s batch totals — widening what
+// actually gets *produced* this week to cover next week's periodic demand
+// would double-count that order's oz (once as an early "preview" this week,
+// then again for real next week).
+export function getUpcomingStandingDemand(standing: StandingOrder[], popupWeekStart: string): DemandLine[] {
+  const nextWeekStart = addDays(popupWeekStart, 7);
+
+  const upcoming: DemandLine[] = [];
+  for (const order of standing) {
+    if (!order.active || order.intervalWeeks <= 1) continue;
+    if (isDueThisWeek(order, popupWeekStart)) continue; // already showing in this week's demand
+    if (!isDueThisWeek(order, nextWeekStart)) continue;
+    const line = standingOrderDemandLine(order, nextWeekStart);
+    if (line) upcoming.push(line);
+  }
+  upcoming.sort((a, b) => a.forDate.localeCompare(b.forDate) || a.customer.localeCompare(b.customer));
+  return upcoming;
 }
 
 // Resolves each demand line to its recipe via `products.source`, sums the
@@ -227,13 +283,16 @@ export async function computeProductionPlan(): Promise<ProductionPlan> {
   const windowStart = today;
   const windowEnd = addDays(today, 8);
 
-  const [demand, recipes, products, stockEntities, latestStock] = await Promise.all([
-    getDemandForWindow(popupWeekStart, windowStart, windowEnd),
+  const [standing, oneOff, recipes, products, stockEntities, latestStock] = await Promise.all([
+    getStandingOrders(),
+    getOneOffOrders(),
     getRecipes(),
     getProducts(),
     getProductionStockEntities(),
     getLatestProductionStock(),
   ]);
+  const demand = getDemandForWindow(standing, oneOff, popupWeekStart, windowStart, windowEnd);
+  const upcomingDemandRaw = getUpcomingStandingDemand(standing, popupWeekStart);
 
   const recipeByRecipeProduct = new Map(recipes.map((r) => [r.recipeProduct, r]));
   const productByName = new Map(products.map((p) => [p.product, p]));
@@ -249,20 +308,24 @@ export async function computeProductionPlan(): Promise<ProductionPlan> {
   // finished drink, not the 128oz of concentrate that went into it.
   // quantityUnit "oz" lines are already raw oz (e.g. loose popup beans
   // drawn straight against the "guatemala roast" recipe, no bag in between).
-  const demandWithOz = demand.map((line) => ({
-    ...line,
-    oz: line.quantityUnit === "oz" ? line.quantity : (productByName.get(line.product)?.unitOz ?? 0) * line.quantity,
-  }));
+  function fillOz(lines: DemandLine[]): DemandLine[] {
+    return lines.map((line) => ({
+      ...line,
+      oz: line.quantityUnit === "oz" ? line.quantity : (productByName.get(line.item)?.unitOz ?? 0) * line.quantity,
+    }));
+  }
+  const demandWithOz = fillOz(demand);
+  const upcomingDemand = fillOz(upcomingDemandRaw);
 
   const demandByProduct = new Map<string, number>();
   const neededByRecipeProduct = new Map<string, number>();
   for (const line of demandWithOz) {
     if (line.quantityUnit === "oz") {
-      neededByRecipeProduct.set(line.product, (neededByRecipeProduct.get(line.product) ?? 0) + line.quantity);
+      neededByRecipeProduct.set(line.item, (neededByRecipeProduct.get(line.item) ?? 0) + line.quantity);
       continue;
     }
-    demandByProduct.set(line.product, (demandByProduct.get(line.product) ?? 0) + line.quantity);
-    const product = productByName.get(line.product);
+    demandByProduct.set(line.item, (demandByProduct.get(line.item) ?? 0) + line.quantity);
+    const product = productByName.get(line.item);
     if (!product) continue;
     const prior = neededByRecipeProduct.get(product.source) ?? 0;
     neededByRecipeProduct.set(product.source, prior + line.quantity * product.ozSourceNeeded);
@@ -336,5 +399,13 @@ export async function computeProductionPlan(): Promise<ProductionPlan> {
     (a, b) => a.category.localeCompare(b.category) || a.recipeProduct.localeCompare(b.recipeProduct),
   );
 
-  return { windowStart, windowEnd, demand: demandWithOz, batches, reserveLevels, productRequirements };
+  return {
+    windowStart,
+    windowEnd,
+    demand: demandWithOz,
+    upcomingDemand,
+    batches,
+    reserveLevels,
+    productRequirements,
+  };
 }

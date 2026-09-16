@@ -49,41 +49,55 @@ export interface Product {
   unitOz: number;
 }
 
-// "standing orders" sheet: recurring weekly demand. channel distinguishes
-// Boast's own Midwife popup from client/event deliveries — display only.
-// quantityUnit "count" (default) means quantity is in the named product's
-// own unit; "oz" means quantity is already raw oz and product names a
+// "standing orders" sheet: recurring demand. channel distinguishes Boast's
+// own Midwife popup from client/event deliveries — display only.
+// quantityUnit "count" (default) means quantity is in the named item's own
+// unit; "oz" means quantity is already raw oz and item names a
 // reserve-tracked product or recipe directly — used for demand that draws
 // straight off a bulk reserve with no packaged product in between (e.g.
 // loose beans used at the popup, pulled straight from the roast bucket).
+// `item` (not `product`) because it's genuinely either: a `Product.product`
+// name (quantityUnit "count") or a `Recipe.recipeProduct` name (quantityUnit
+// "oz") — the same generalization "entity" already makes for reserve stock.
+// intervalWeeks/anchorDate model cadence beyond weekly: intervalWeeks 1 (or
+// blank) is weekly (the original, only behavior); 3 is triweekly; 4
+// approximates "monthly" (accepted drift vs. true calendar months).
+// anchorDate is any real occurrence of the order — used only to compute
+// which weeks are "in phase" with the interval, not to pick the weekday
+// (dayOfWeek still does that). A blank anchorDate with intervalWeeks > 1 is
+// treated as weekly rather than silently dropping the order — a
+// misconfigured row over-producing one week is visible and correctable; one
+// that silently skips a real delivery is not.
 export interface StandingOrder {
   customer: string;
-  product: string;
+  item: string;
   quantity: number;
   quantityUnit: "count" | "oz";
   dayOfWeek: string;
   active: boolean;
   channel: string;
+  intervalWeeks: number;
+  anchorDate: string;
 }
 
 // "orders" sheet: one-off demand for a specific date. See StandingOrder for
-// what quantityUnit means.
+// what quantityUnit/item mean.
 export interface OneOffOrder {
   date: string;
   customer: string;
-  product: string;
+  item: string;
   quantity: number;
   quantityUnit: "count" | "oz";
   notes: string;
   channel: string;
 }
 
-// A single customer/product demand line for one delivery date within the
+// A single customer/item demand line for one delivery date within the
 // week's Wed-Sat window, regardless of whether it came from a standing order
 // (mapped onto a concrete date via its weekday) or a one-off order.
 export interface DemandLine {
   customer: string;
-  product: string;
+  item: string;
   quantity: number;
   quantityUnit: "count" | "oz";
   forDate: string;
@@ -155,6 +169,10 @@ export interface ProductionPlan {
   windowStart: string;
   windowEnd: string;
   demand: DemandLine[];
+  // Non-weekly standing orders due next calendar week — informational only,
+  // never folded into batches/productRequirements below (see
+  // getUpcomingStandingDemand in production.ts for why).
+  upcomingDemand: DemandLine[];
   batches: BatchRequirement[];
   reserveLevels: ReserveLevel[];
   productRequirements: ProductRequirement[];

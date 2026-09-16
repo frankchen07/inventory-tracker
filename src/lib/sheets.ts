@@ -36,10 +36,18 @@ export const STANDING_ORDERS_SHEET = "standing orders";
 // quantityUnit: "count" (quantity is in product's own unit) or "oz"
 // (quantity is raw oz, product names a reserve-tracked product/recipe
 // directly — for demand with no packaged product, e.g. loose popup beans).
-export const STANDING_ORDERS_HEADERS = ["customer", "product", "quantity", "quantityUnit", "dayOfWeek", "active", "channel"] as const;
+// anchorDate/intervalWeeks: cadence beyond weekly (e.g. triweekly, or
+// monthly approximated as every 4 weeks) — see StandingOrder in types.ts.
+// This order must match the actual "standing orders" tab's header row
+// exactly (readRows maps columns by position, not by name) — it's
+// anchorDate/intervalWeeks/active/channel in the real sheet, not the append-
+// at-the-end order originally planned. Column is labeled "item" (not
+// "product") since it's either a products-sheet name or a recipe name
+// directly — see StandingOrder in types.ts.
+export const STANDING_ORDERS_HEADERS = ["customer", "item", "quantity", "quantityUnit", "dayOfWeek", "anchorDate", "intervalWeeks", "active", "channel"] as const;
 
 export const ORDERS_SHEET = "orders";
-export const ORDERS_HEADERS = ["date", "customer", "product", "quantity", "quantityUnit", "notes", "channel"] as const;
+export const ORDERS_HEADERS = ["date", "customer", "item", "quantity", "quantityUnit", "notes", "channel"] as const;
 
 // Running reserve-level tracking for finished/semi-finished production goods
 // — shaped exactly like "inventory": fixed catalog columns, then one date

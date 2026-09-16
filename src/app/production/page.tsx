@@ -6,9 +6,16 @@ export const dynamic = "force-dynamic";
 
 const CATEGORY_LABEL: Record<string, string> = {
   concentrate: "Brew concentrate",
-  roast: "Roast beans",
+  beans: "Roast beans",
   ingredient: "Make ingredients",
+  purchase: "Purchase",
 };
+
+// Preferred order for the trailing category sections (see byCategory below)
+// — anything not listed here still renders, just after these and under its
+// own raw category name, so a typo'd or future category can never silently
+// vanish from the page the way "roast" mis-typed as "order" once did.
+const CATEGORY_ORDER = ["beans", "purchase"];
 
 // Ceiling, not nearest — an oz-derived "how much to produce" figure should
 // never round down below what's actually needed.
@@ -22,12 +29,15 @@ function formatDayLabel(date: string): string {
   return `${weekday} ${m}/${d}`;
 }
 
-function BatchCard({ b }: { b: BatchRequirement }) {
-  const isRoast = b.category === "roast";
+function batchHeadline(b: BatchRequirement): string {
   const yieldQty = b.batchesNeeded * b.recipeOzYieldQty;
-  const headline = isRoast
-    ? `Roast ${Math.round(yieldQty / 16)} lbs`
-    : `Make ${b.batchesNeeded} batch${b.batchesNeeded === 1 ? "" : "es"}`;
+  if (b.category === "beans") return `Roast ${Math.round(yieldQty / 16)} lbs`;
+  if (b.category === "purchase") return `Order ${b.batchesNeeded}`;
+  return `Make ${b.batchesNeeded} batch${b.batchesNeeded === 1 ? "" : "es"}`;
+}
+
+function BatchCard({ b }: { b: BatchRequirement }) {
+  const headline = batchHeadline(b);
   return (
     <li className="flex items-center justify-between gap-4 px-4 py-3 text-sm">
       <span className="font-medium text-zinc-900">{b.recipeProduct}</span>
@@ -48,19 +58,34 @@ export default async function ProductionPage() {
     byCategory.set(b.category, list);
   }
 
+  // Everything except concentrate/ingredient (which have fixed positions
+  // around "Also make" below) renders here, in CATEGORY_ORDER's preference
+  // order, then anything else alphabetically — so a category nobody's
+  // labeled yet still shows up instead of silently disappearing.
+  const trailingCategories = [...byCategory.keys()]
+    .filter((c) => c !== "concentrate" && c !== "ingredient")
+    .sort((a, b) => {
+      const ai = CATEGORY_ORDER.indexOf(a);
+      const bi = CATEGORY_ORDER.indexOf(b);
+      if (ai !== -1 && bi !== -1) return ai - bi;
+      if (ai !== -1) return -1;
+      if (bi !== -1) return 1;
+      return a.localeCompare(b);
+    });
+
   const popupLines = plan.demand.filter((l) => l.channel === "popup");
   const clientLines = plan.demand.filter((l) => l.channel !== "popup");
 
   const popupTotals = new Map<string, { qty: number; oz: number; quantityUnit: "count" | "oz" }>();
   for (const line of popupLines) {
-    const prior = popupTotals.get(line.product) ?? { qty: 0, oz: 0, quantityUnit: line.quantityUnit };
-    popupTotals.set(line.product, {
+    const prior = popupTotals.get(line.item) ?? { qty: 0, oz: 0, quantityUnit: line.quantityUnit };
+    popupTotals.set(line.item, {
       qty: prior.qty + line.quantity,
       oz: prior.oz + line.oz,
       quantityUnit: line.quantityUnit,
     });
   }
-  const popupProducts = [...popupTotals.keys()].sort((a, b) => a.localeCompare(b));
+  const popupItems = [...popupTotals.keys()].sort((a, b) => a.localeCompare(b));
 
   const clientSorted = [...clientLines].sort(
     (a: DemandLine, b: DemandLine) => a.forDate.localeCompare(b.forDate) || a.customer.localeCompare(b.customer),
@@ -88,15 +113,15 @@ export default async function ProductionPage() {
         <h2 className="border-b border-zinc-200 bg-zinc-50 px-4 py-2 text-sm font-semibold text-zinc-900">
           This week&apos;s Midwife popup
         </h2>
-        {popupProducts.length === 0 ? (
+        {popupItems.length === 0 ? (
           <p className="px-4 py-3 text-sm text-zinc-500">Nothing planned for the popup this week.</p>
         ) : (
           <ul className="divide-y divide-zinc-100">
-            {popupProducts.map((product) => {
-              const t = popupTotals.get(product)!;
+            {popupItems.map((item) => {
+              const t = popupTotals.get(item)!;
               return (
-                <li key={product} className="flex items-center justify-between px-4 py-2 text-sm">
-                  <span className="text-zinc-900">{product}</span>
+                <li key={item} className="flex items-center justify-between px-4 py-2 text-sm">
+                  <span className="text-zinc-900">{item}</span>
                   <span className="text-zinc-500">
                     {t.quantityUnit === "oz" ? (
                       `${ceilDisplay(t.oz)} oz`
@@ -122,14 +147,14 @@ export default async function ProductionPage() {
         ) : (
           <ul className="divide-y divide-zinc-100">
             {clientSorted.map((line, i) => (
-              <li key={`${line.customer}-${line.product}-${i}`} className="flex items-center justify-between px-4 py-2 text-sm">
+              <li key={`${line.customer}-${line.item}-${i}`} className="flex items-center justify-between px-4 py-2 text-sm">
                 <span className="text-zinc-900">{line.customer}</span>
                 <span className="text-zinc-500">
                   {line.quantityUnit === "oz" ? (
-                    <>{line.product} - {ceilDisplay(line.oz)} oz</>
+                    <>{line.item} - {ceilDisplay(line.oz)} oz</>
                   ) : (
                     <>
-                      {line.quantity} &times; {line.product}{" "}
+                      {line.quantity} &times; {line.item}{" "}
                       <span className="text-zinc-400">({ceilDisplay(line.oz)} oz)</span>
                     </>
                   )}{" "}
@@ -140,6 +165,31 @@ export default async function ProductionPage() {
           </ul>
         )}
       </div>
+
+      {plan.upcomingDemand.length > 0 && (
+        <div className="mt-6 rounded-lg border border-dashed border-zinc-300">
+          <h2 className="border-b border-dashed border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-500">
+            Heads up &mdash; next week
+          </h2>
+          <ul className="divide-y divide-zinc-100">
+            {plan.upcomingDemand.map((line, i) => (
+              <li key={`${line.customer}-${line.item}-${i}`} className="flex items-center justify-between px-4 py-2 text-sm">
+                <span className="text-zinc-700">{line.customer}</span>
+                <span className="text-zinc-400">
+                  {line.quantityUnit === "oz" ? (
+                    <>{line.item} - {ceilDisplay(line.oz)} oz</>
+                  ) : (
+                    <>
+                      {line.quantity} &times; {line.item} ({ceilDisplay(line.oz)} oz)
+                    </>
+                  )}{" "}
+                  ({formatDayLabel(line.forDate)})
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <div className="mt-6 rounded-lg border border-zinc-200">
         <div className="flex items-center justify-between border-b border-zinc-200 bg-zinc-50 px-4 py-2">
@@ -206,18 +256,18 @@ export default async function ProductionPage() {
         </div>
       )}
 
-      {byCategory.get("roast") && (
-        <div className="mt-6 rounded-lg border border-zinc-200">
+      {trailingCategories.map((category) => (
+        <div key={category} className="mt-6 rounded-lg border border-zinc-200">
           <h2 className="border-b border-zinc-200 bg-zinc-50 px-4 py-2 text-sm font-semibold text-zinc-900">
-            {CATEGORY_LABEL.roast}
+            {CATEGORY_LABEL[category] ?? category}
           </h2>
           <ul className="divide-y divide-zinc-100">
-            {byCategory.get("roast")!.map((b) => (
+            {byCategory.get(category)!.map((b) => (
               <BatchCard key={b.recipeProduct} b={b} />
             ))}
           </ul>
         </div>
-      )}
+      ))}
     </main>
   );
 }
