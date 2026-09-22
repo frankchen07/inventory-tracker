@@ -108,6 +108,13 @@ export interface DemandLine {
   // Oz-equivalent of quantity, using the product's own physical size
   // (unitOz), not its recipe-input ozSourceNeeded.
   oz: number;
+  // A friendly packaged-unit quantity for display, when unambiguous: for a
+  // "count" line this is just quantity; for an "oz" line (a recipe drawn
+  // directly, e.g. loose vanilla syrup) it's quantity/unitOz of the single
+  // product sourced from that recipe, or null if zero or multiple products
+  // could apply (e.g. espresso ccx has three differently-sized products, so
+  // there's no single right answer — display falls back to raw oz instead).
+  displayQty: number | null;
 }
 
 // How much of one recipe product is needed this week, and how many batches
@@ -145,6 +152,9 @@ export interface ProductionStockEntity {
 export interface ReserveLevel {
   entity: string;
   entityType: "recipe" | "product";
+  // Recipe category (e.g. "beans"), for picking a friendly display unit on
+  // recipe-type rows — undefined/irrelevant for entityType "product".
+  category?: string;
   amt: number;
   amtUnit: string;
   onHand: number;

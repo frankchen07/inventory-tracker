@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { computeProductionPlan } from "@/lib/production";
-import type { BatchRequirement, DemandLine } from "@/lib/types";
+import type { BatchRequirement, DemandLine, ReserveLevel } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -23,6 +23,13 @@ function ceilDisplay(n: number): number {
   return Math.ceil(n);
 }
 
+// 1-decimal rounding for friendly-unit display figures (converted oz counts,
+// pounds) — these are informational, not a "never round down" production
+// figure, so nearest is right rather than ceiling.
+function roundDisplay(n: number): number {
+  return Math.round(n * 10) / 10;
+}
+
 function formatDayLabel(date: string): string {
   const [y, m, d] = date.split("-").map(Number);
   const weekday = new Date(y, m - 1, d).toLocaleDateString("en-US", { weekday: "short" });
@@ -34,6 +41,37 @@ function batchHeadline(b: BatchRequirement): string {
   if (b.category === "beans") return `Roast ${Math.round(yieldQty / 16)} lbs`;
   if (b.category === "purchase") return `Order ${b.batchesNeeded}`;
   return `Make ${b.batchesNeeded} batch${b.batchesNeeded === 1 ? "" : "es"}`;
+}
+
+// Reserve rows show a friendly, fractional native unit as the primary figure
+// wherever one exists (a product's own kegs/bottles, or — for "beans"
+// recipes — pounds), with oz kept only as a secondary reference when it's
+// not already redundant with the primary. topUpQty is always in the row's
+// own native unit already (entered that way in the reserve-stock sheet), so
+// "need" reads directly off it rather than being reconverted from oz.
+function reserveRowDisplay(r: ReserveLevel): { primary: string; secondary: string | null; need: string | null } {
+  if (r.entityType === "product") {
+    return {
+      primary: `${r.onHand} / ${r.amt} ${r.amtUnit}`,
+      secondary: `${ceilDisplay(r.onHandOz)} / ${ceilDisplay(r.amtOz)} oz`,
+      need: r.topUpQty > 0 ? `need ${roundDisplay(r.topUpQty)} ${r.amtUnit}` : null,
+    };
+  }
+  if (r.category === "beans") {
+    return {
+      primary: `${roundDisplay(r.onHand / 16)} / ${roundDisplay(r.amt / 16)} lbs`,
+      secondary: `${ceilDisplay(r.onHandOz)} / ${ceilDisplay(r.amtOz)} oz`,
+      need: r.topUpQty > 0 ? `need ${roundDisplay(r.topUpQty / 16)} lbs` : null,
+    };
+  }
+  return {
+    primary: `${r.onHand} / ${r.amt} ${r.amtUnit}`,
+    secondary: null,
+    // Recipe entities are oz-native (reserveUnitOz === 1 in production.ts),
+    // so topUpQty is already in oz here — same figure as amtOz - onHandOz,
+    // just read directly instead of recomputed.
+    need: r.topUpQty > 0 ? `need ${ceilDisplay(r.topUpQty)} oz` : null,
+  };
 }
 
 function BatchCard({ b }: { b: BatchRequirement }) {
@@ -76,13 +114,12 @@ export default async function ProductionPage() {
   const popupLines = plan.demand.filter((l) => l.channel === "popup");
   const clientLines = plan.demand.filter((l) => l.channel !== "popup");
 
-  const popupTotals = new Map<string, { qty: number; oz: number; quantityUnit: "count" | "oz" }>();
+  const popupTotals = new Map<string, { oz: number; displayQty: number | null }>();
   for (const line of popupLines) {
-    const prior = popupTotals.get(line.item) ?? { qty: 0, oz: 0, quantityUnit: line.quantityUnit };
+    const prior = popupTotals.get(line.item) ?? { oz: 0, displayQty: 0 };
     popupTotals.set(line.item, {
-      qty: prior.qty + line.quantity,
       oz: prior.oz + line.oz,
-      quantityUnit: line.quantityUnit,
+      displayQty: prior.displayQty === null || line.displayQty === null ? null : prior.displayQty + line.displayQty,
     });
   }
   const popupItems = [...popupTotals.keys()].sort((a, b) => a.localeCompare(b));
@@ -123,13 +160,7 @@ export default async function ProductionPage() {
                 <li key={item} className="flex items-center justify-between px-4 py-2 text-sm">
                   <span className="text-zinc-900">{item}</span>
                   <span className="text-zinc-500">
-                    {t.quantityUnit === "oz" ? (
-                      `${ceilDisplay(t.oz)} oz`
-                    ) : (
-                      <>
-                        {t.qty} <span className="text-zinc-400">({ceilDisplay(t.oz)} oz)</span>
-                      </>
-                    )}
+                    {t.displayQty !== null ? roundDisplay(t.displayQty) : `${ceilDisplay(t.oz)} oz`}
                   </span>
                 </li>
               );
@@ -154,7 +185,7 @@ export default async function ProductionPage() {
                     <>{line.item} <span className="text-zinc-400">({ceilDisplay(line.oz)} oz)</span></>
                   ) : (
                     <>
-                      {line.quantity} &times; {line.item}{" "}
+                      {line.item} &times; {line.quantity}{" "}
                       <span className="text-zinc-400">({ceilDisplay(line.oz)} oz)</span>
                     </>
                   )}{" "}
@@ -180,7 +211,7 @@ export default async function ProductionPage() {
                     <>{line.item} <span className="text-zinc-400">({ceilDisplay(line.oz)} oz)</span></>
                   ) : (
                     <>
-                      {line.quantity} &times; {line.item} ({ceilDisplay(line.oz)} oz)
+                      {line.item} &times; {line.quantity} ({ceilDisplay(line.oz)} oz)
                     </>
                   )}{" "}
                   ({formatDayLabel(line.forDate)})
@@ -199,16 +230,19 @@ export default async function ProductionPage() {
           </Link>
         </div>
         <ul className="divide-y divide-zinc-100">
-          {plan.reserveLevels.map((r) => (
-            <li key={r.entity} className="flex items-center justify-between gap-4 px-4 py-2 text-sm">
-              <span className="text-zinc-900">{r.entity}</span>
-              <span className={r.topUpQty > 0 ? "font-medium text-amber-700" : "text-zinc-500"}>
-                {r.onHand} / {r.amt} {r.amtUnit}{" "}
-                <span className="text-zinc-400">({ceilDisplay(r.onHandOz)} / {ceilDisplay(r.amtOz)} oz)</span>
-                {r.topUpQty > 0 ? ` · need ${ceilDisplay(r.amtOz - r.onHandOz)} oz` : ""}
-              </span>
-            </li>
-          ))}
+          {plan.reserveLevels.map((r) => {
+            const { primary, secondary, need } = reserveRowDisplay(r);
+            return (
+              <li key={r.entity} className="flex items-center justify-between gap-4 px-4 py-2 text-sm">
+                <span className="text-zinc-900">{r.entity}</span>
+                <span className={r.topUpQty > 0 ? "font-medium text-amber-700" : "text-zinc-500"}>
+                  {primary}
+                  {secondary && <> <span className="text-zinc-400">({secondary})</span></>}
+                  {need ? ` · ${need}` : ""}
+                </span>
+              </li>
+            );
+          })}
         </ul>
       </div>
 

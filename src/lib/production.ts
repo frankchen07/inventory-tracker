@@ -135,6 +135,7 @@ function standingOrderDemandLine(order: StandingOrder, weekStart: string): Deman
     forDate: addDays(weekStart, dayIndex),
     channel: order.channel,
     oz: 0, // filled in by fillOz() once product sizes are known
+    displayQty: null, // filled in by fillOz()
   };
 }
 
@@ -229,6 +230,7 @@ export function getDemandForWindow(
         forDate: order.date,
         channel: order.channel,
         oz: 0,
+        displayQty: null,
       });
     }
   }
@@ -298,6 +300,12 @@ export async function computeProductionPlan(): Promise<ProductionPlan> {
 
   const recipeByRecipeProduct = new Map(recipes.map((r) => [r.recipeProduct, r]));
   const productByName = new Map(products.map((p) => [p.product, p]));
+  const productsByRecipe = new Map<string, Product[]>();
+  for (const p of products) {
+    const list = productsByRecipe.get(p.source) ?? [];
+    list.push(p);
+    productsByRecipe.set(p.source, list);
+  }
 
   // A reserve entity's own oz size — recipe entities are already oz-native,
   // product entities convert through that product's own physical size.
@@ -310,11 +318,26 @@ export async function computeProductionPlan(): Promise<ProductionPlan> {
   // finished drink, not the 128oz of concentrate that went into it.
   // quantityUnit "oz" lines are already raw oz (e.g. loose popup beans
   // drawn straight against the "guatemala roast" recipe, no bag in between).
+  //
+  // displayQty is a friendly packaged-unit figure for display: a "count"
+  // line already is one (its quantity), so it's used as-is; an "oz" line
+  // converts to the one product sourced from that recipe, but only when
+  // there's exactly one such product — e.g. espresso ccx has three
+  // differently-sized products, so there's no single right conversion and
+  // display falls back to raw oz instead.
   function fillOz(lines: DemandLine[]): DemandLine[] {
-    return lines.map((line) => ({
-      ...line,
-      oz: line.quantityUnit === "oz" ? line.quantity : (productByName.get(line.item)?.unitOz ?? 0) * line.quantity,
-    }));
+    return lines.map((line) => {
+      if (line.quantityUnit === "oz") {
+        const sourced = productsByRecipe.get(line.item) ?? [];
+        const displayQty = sourced.length === 1 && sourced[0].unitOz > 0 ? line.quantity / sourced[0].unitOz : null;
+        return { ...line, oz: line.quantity, displayQty };
+      }
+      return {
+        ...line,
+        oz: (productByName.get(line.item)?.unitOz ?? 0) * line.quantity,
+        displayQty: line.quantity,
+      };
+    });
   }
   const demandWithOz = fillOz(demand);
   const upcomingDemand = fillOz(upcomingDemandRaw);
@@ -348,6 +371,7 @@ export async function computeProductionPlan(): Promise<ProductionPlan> {
     reserveLevels.push({
       entity: entity.entity,
       entityType: entity.entityType,
+      category: entity.entityType === "recipe" ? recipeByRecipeProduct.get(entity.entity)?.category : undefined,
       amt: entity.amt,
       amtUnit: entity.amtUnit,
       onHand,
