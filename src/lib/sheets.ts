@@ -46,7 +46,7 @@ export const STANDING_ORDERS_SHEET = "standing orders";
 // directly — see StandingOrder in types.ts.
 export const STANDING_ORDERS_HEADERS = ["customer", "item", "quantity", "quantityUnit", "dayOfWeek", "anchorDate", "intervalWeeks", "active", "channel"] as const;
 
-export const ORDERS_SHEET = "orders";
+export const ORDERS_SHEET = "a la carte orders";
 // active: mirrors StandingOrder.active (TRUE/FALSE, blank = inactive) so a
 // specific one-off order can be cancelled/voided without deleting the row.
 // Appended at the end, not inserted, per the standing-orders column-position

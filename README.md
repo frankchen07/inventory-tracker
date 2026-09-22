@@ -31,7 +31,7 @@ Six tabs, each a flat table with a header row (no numeric IDs — everything is 
 - **recipes** — batch processes (brewing, roasting, etc.) and their oz yield per batch.
 - **products** — the countable units you actually order/reserve (a bottle, a keg, a bag size),
   each pointing at the one recipe it's filled from.
-- **standing orders** / **orders** — recurring weekly demand and one-off dated demand.
+- **standing orders** / **a la carte orders** — recurring demand and one-off dated demand.
 - **reserve stock** — target on-hand levels for whichever products or recipes you keep a
   buffer of, shaped like `inventory` (fixed columns + one date column per physical count).
 
