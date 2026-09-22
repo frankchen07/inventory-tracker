@@ -259,17 +259,17 @@ export function getUpcomingStandingDemand(standing: StandingOrder[], popupWeekSt
   return upcoming;
 }
 
-// Resolves each demand line to its recipe via `products.source`, sums the
-// total recipe quantity needed across the whole capture window, folds in any
-// reserve-level shortfall (evaluated independent of orders — a low reserve
-// tops up production even with zero orders), then converts each recipe's
-// total to whole batches. This is a flat sum, not a chain — a product's
-// demand and a reserve entity's top-up each land directly on a recipe with
-// no netting between them (e.g. nitro keg orders and the concentrate
-// reserve's own top-up are independent asks, even though physically they'd
-// draw from the same brew — see the plan doc for why that trade-off is
-// accepted). Demand lines for a product with no matching `products` row are
-// left out of the batch totals but still show up in `demand`.
+// Resolves each demand line to its recipe via `products.source`, then nets
+// demand against on-hand reserve stock at *both* levels before converting to
+// whole batches — a product's demand nets against that product's own
+// on-hand/target first (e.g. surplus nitro kegs already on hand reduce how
+// many more are needed), and the resulting oz-equivalent folds into its
+// source recipe's raw need, which then nets against the recipe's own
+// on-hand/target too (e.g. concentrate already in reserve reduces how much
+// more needs brewing) — see computeProductionPlan() below for the two-stage
+// `max(0, target + demand - onHand)` formula. Demand lines for a product
+// with no matching `products` row are left out of the batch totals but
+// still show up in `demand`.
 //
 // windowStart/windowEnd are a rolling ~9-day capture window starting today
 // (not tied to the calendar week) — wide enough that an order due early next
@@ -319,28 +319,31 @@ export async function computeProductionPlan(): Promise<ProductionPlan> {
   const demandWithOz = fillOz(demand);
   const upcomingDemand = fillOz(upcomingDemandRaw);
 
+  // Raw demand: count-based demand per product (deliberately NOT folded
+  // into a recipe yet — it nets against that product's own on-hand first,
+  // below), and oz-per-recipe from direct oz-lines (e.g. loose beans drawn
+  // straight against a recipe, no packaged product in between).
   const demandByProduct = new Map<string, number>();
-  const neededByRecipeProduct = new Map<string, number>();
+  const rawOzByRecipe = new Map<string, number>();
   for (const line of demandWithOz) {
     if (line.quantityUnit === "oz") {
-      neededByRecipeProduct.set(line.item, (neededByRecipeProduct.get(line.item) ?? 0) + line.quantity);
+      rawOzByRecipe.set(line.item, (rawOzByRecipe.get(line.item) ?? 0) + line.quantity);
       continue;
     }
     demandByProduct.set(line.item, (demandByProduct.get(line.item) ?? 0) + line.quantity);
-    const product = productByName.get(line.item);
-    if (!product) continue;
-    const prior = neededByRecipeProduct.get(product.source) ?? 0;
-    neededByRecipeProduct.set(product.source, prior + line.quantity * product.ozSourceNeeded);
   }
 
   // Every reserve-tracked entity gets a level (even at/above target) so the
-  // "Reserve" section always shows the full picture; only a positive
-  // shortfall (topUpQty > 0) actually feeds into the batch totals below.
+  // "Reserve" section always shows the full picture — a pure on-hand-vs-
+  // target snapshot answering "is my safety stock intact," which is a
+  // deliberately different question from "how much do I need to make this
+  // week" (computed below via the netted totals).
   const reserveLevels: ReserveLevel[] = [];
-  const topUpByProductEntity = new Map<string, number>();
+  const topUpByEntity = new Map<string, number>();
   for (const entity of stockEntities) {
     const onHand = latestStock.get(entity.entity) ?? 0;
     const topUpQty = Math.max(0, entity.amt - onHand);
+    topUpByEntity.set(entity.entity, topUpQty);
     const unitOz = reserveUnitOz(entity);
     reserveLevels.push({
       entity: entity.entity,
@@ -352,35 +355,61 @@ export async function computeProductionPlan(): Promise<ProductionPlan> {
       amtOz: entity.amt * unitOz,
       onHandOz: onHand * unitOz,
     });
-    if (topUpQty <= 0) continue;
-
-    if (entity.entityType === "recipe") {
-      const prior = neededByRecipeProduct.get(entity.entity) ?? 0;
-      neededByRecipeProduct.set(entity.entity, prior + topUpQty);
-    } else {
-      topUpByProductEntity.set(entity.entity, topUpQty);
-      const product = productByName.get(entity.entity);
-      if (!product) continue;
-      const prior = neededByRecipeProduct.get(product.source) ?? 0;
-      neededByRecipeProduct.set(product.source, prior + topUpQty * product.ozSourceNeeded);
-    }
   }
 
-  // Only reserve-tracked products get a "make N" line, in that product's own
-  // count unit — a product made fresh at time of sale (no reserve of its
-  // own) is never an independent production action, so it never shows up
-  // here even with real demand; that demand is already folded into the
-  // recipe batch totals above.
+  // Product-level netting: a reserve-tracked product's actionable "make N"
+  // total nets its demand against its own on-hand/target — surplus units
+  // already on hand reduce it, a shortfall increases it, same formula
+  // either way: max(0, target + demand - onHand). topUpQty is kept as a
+  // separate, purely informational "how much of a raw buffer shortfall
+  // exists" figure — it's no longer summed into totalQty (that would
+  // double-count demand already covered by on-hand stock). The netted
+  // totalQty (not raw demand) is what folds upward into the source
+  // recipe's raw oz need, since that's the actual number of units that
+  // still need making.
   const productRequirements: ProductRequirement[] = [];
+  const productEntityNames = new Set(
+    stockEntities.filter((e) => e.entityType === "product").map((e) => e.entity),
+  );
   for (const entity of stockEntities) {
     if (entity.entityType !== "product") continue;
+    const product = productByName.get(entity.entity);
     const demandQty = demandByProduct.get(entity.entity) ?? 0;
-    const topUpQty = topUpByProductEntity.get(entity.entity) ?? 0;
-    const totalQty = demandQty + topUpQty;
-    if (totalQty <= 0) continue;
-    productRequirements.push({ product: entity.entity, demandQty, topUpQty, totalQty });
+    const onHand = latestStock.get(entity.entity) ?? 0;
+    const topUpQty = topUpByEntity.get(entity.entity) ?? 0;
+    const totalQty = Math.max(0, entity.amt + demandQty - onHand);
+    if (totalQty > 0) {
+      productRequirements.push({ product: entity.entity, demandQty, topUpQty, totalQty });
+    }
+    if (product) {
+      rawOzByRecipe.set(product.source, (rawOzByRecipe.get(product.source) ?? 0) + totalQty * product.ozSourceNeeded);
+    }
   }
   productRequirements.sort((a, b) => a.product.localeCompare(b.product));
+
+  // Products with real demand but no reserve-stock row are made fresh to
+  // order — no on-hand to net against, so their raw demand folds straight
+  // into the source recipe's need, same as before this change.
+  for (const [productName, demandQty] of demandByProduct) {
+    if (productEntityNames.has(productName)) continue; // already handled above
+    const product = productByName.get(productName);
+    if (!product) continue;
+    rawOzByRecipe.set(product.source, (rawOzByRecipe.get(product.source) ?? 0) + demandQty * product.ozSourceNeeded);
+  }
+
+  // Recipe-level netting: same formula, one level up — a recipe's
+  // actionable "need to brew" total nets its raw demand (direct oz-lines
+  // plus everything folded up from products above) against its own
+  // on-hand/target. Recipes with no reserve-stock row have nothing to net
+  // against, so their raw demand is used as-is (matches pre-netting
+  // behavior for anything not reserve-tracked).
+  const neededByRecipeProduct = new Map(rawOzByRecipe);
+  for (const entity of stockEntities) {
+    if (entity.entityType !== "recipe") continue;
+    const rawOz = rawOzByRecipe.get(entity.entity) ?? 0;
+    const onHand = latestStock.get(entity.entity) ?? 0;
+    neededByRecipeProduct.set(entity.entity, Math.max(0, entity.amt + rawOz - onHand));
+  }
 
   const batches: BatchRequirement[] = [];
   for (const [recipeProduct, totalNeededQty] of neededByRecipeProduct) {

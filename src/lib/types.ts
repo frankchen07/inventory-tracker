@@ -110,8 +110,11 @@ export interface DemandLine {
   oz: number;
 }
 
-// How much of one recipe product is needed on a given date, and how many
-// batches that requires. unit is always "oz".
+// How much of one recipe product is needed this week, and how many batches
+// that requires. totalNeededQty is already netted against on-hand reserve
+// stock (max(0, target + demand - onHand), or raw demand as-is for a recipe
+// with no reserve-stock row) — see computeProductionPlan() in production.ts.
+// unit is always "oz".
 export interface BatchRequirement {
   recipeProduct: string;
   category: string;
@@ -134,8 +137,11 @@ export interface ProductionStockEntity {
 
 // Current on-hand vs. target for one reserve-tracked entity — every entity
 // gets one of these regardless of whether it's currently short (topUpQty may
-// be 0), powering the always-visible "Reserve" section. When topUpQty > 0 it
-// was also folded into the corresponding recipe product's batch total.
+// be 0), powering the always-visible "Reserve" section. This is a pure
+// on-hand-vs-target snapshot ("is my safety stock intact") — topUpQty is
+// informational only here and is *not* what feeds batch/product totals;
+// those net demand against on-hand directly (see ProductRequirement and
+// BatchRequirement) rather than reusing this raw shortfall figure.
 export interface ReserveLevel {
   entity: string;
   entityType: "recipe" | "product";
@@ -150,8 +156,7 @@ export interface ReserveLevel {
   onHandOz: number;
 }
 
-// How many units of one product to make this week — demand across both
-// channels plus that product's own reserve top-up, in the product's own
+// How many units of one product to make this week, in the product's own
 // count (e.g. number of kegs, not oz). Only *reserve-tracked* products show
 // up here (i.e. products with a "reserve stock" row) — a product made fresh
 // at time of sale with no reserve of its own (bottle, pouch, bag sizes) is
@@ -160,7 +165,12 @@ export interface ReserveLevel {
 export interface ProductRequirement {
   product: string;
   demandQty: number;
+  // Informational only: the raw max(0, target - onHand) buffer shortfall,
+  // ignoring demand entirely. NOT summed into totalQty — see totalQty.
   topUpQty: number;
+  // The actionable "make N" figure: demand netted against on-hand/target,
+  // max(0, target + demandQty - onHand) — NOT demandQty + topUpQty, since
+  // that would double-count demand already covered by on-hand stock.
   totalQty: number;
 }
 
