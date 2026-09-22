@@ -47,7 +47,12 @@ export const STANDING_ORDERS_SHEET = "standing orders";
 export const STANDING_ORDERS_HEADERS = ["customer", "item", "quantity", "quantityUnit", "dayOfWeek", "anchorDate", "intervalWeeks", "active", "channel"] as const;
 
 export const ORDERS_SHEET = "orders";
-export const ORDERS_HEADERS = ["date", "customer", "item", "quantity", "quantityUnit", "notes", "channel"] as const;
+// active: mirrors StandingOrder.active (TRUE/FALSE, blank = inactive) so a
+// specific one-off order can be cancelled/voided without deleting the row.
+// Appended at the end, not inserted, per the standing-orders column-position
+// lesson — readRows maps columns by position, so inserting mid-row silently
+// shifts every field after it.
+export const ORDERS_HEADERS = ["date", "customer", "item", "quantity", "quantityUnit", "notes", "channel", "active"] as const;
 
 // Running reserve-level tracking for finished/semi-finished production goods
 // — shaped exactly like "inventory": fixed catalog columns, then one date

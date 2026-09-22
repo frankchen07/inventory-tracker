@@ -151,7 +151,7 @@ export default async function ProductionPage() {
                 <span className="text-zinc-900">{line.customer}</span>
                 <span className="text-zinc-500">
                   {line.quantityUnit === "oz" ? (
-                    <>{line.item} - {ceilDisplay(line.oz)} oz</>
+                    <>{line.item} <span className="text-zinc-400">({ceilDisplay(line.oz)} oz)</span></>
                   ) : (
                     <>
                       {line.quantity} &times; {line.item}{" "}
@@ -177,7 +177,7 @@ export default async function ProductionPage() {
                 <span className="text-zinc-700">{line.customer}</span>
                 <span className="text-zinc-400">
                   {line.quantityUnit === "oz" ? (
-                    <>{line.item} - {ceilDisplay(line.oz)} oz</>
+                    <>{line.item} <span className="text-zinc-400">({ceilDisplay(line.oz)} oz)</span></>
                   ) : (
                     <>
                       {line.quantity} &times; {line.item} ({ceilDisplay(line.oz)} oz)

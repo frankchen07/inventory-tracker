@@ -148,6 +148,7 @@ export async function getOneOffOrders(): Promise<OneOffOrder[]> {
     quantityUnit: parseQuantityUnit(r.quantityUnit),
     notes: r.notes,
     channel: r.channel.trim().toLowerCase() === "popup" ? "popup" : "client",
+    active: r.active.trim().toUpperCase() === "TRUE",
   }));
 }
 
@@ -218,6 +219,7 @@ export function getDemandForWindow(
     if (line) demand.push(line);
   }
   for (const order of oneOff) {
+    if (!order.active) continue;
     if (order.date >= windowStart && order.date <= windowEnd) {
       demand.push({
         customer: order.customer,

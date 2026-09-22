@@ -81,7 +81,9 @@ export interface StandingOrder {
 }
 
 // "orders" sheet: one-off demand for a specific date. See StandingOrder for
-// what quantityUnit/item mean.
+// what quantityUnit/item mean, and for active (blank = inactive, same
+// convention — lets a specific one-off order be cancelled/voided without
+// deleting the row).
 export interface OneOffOrder {
   date: string;
   customer: string;
@@ -90,6 +92,7 @@ export interface OneOffOrder {
   quantityUnit: "count" | "oz";
   notes: string;
   channel: string;
+  active: boolean;
 }
 
 // A single customer/item demand line for one delivery date within the
