@@ -36,6 +36,23 @@ function formatDayLabel(date: string): string {
   return `${weekday} ${m}/${d}`;
 }
 
+// Tap/click-friendly popover for an "explain this section" hint — a native
+// <details>/<summary> disclosure needs no client-side JS at all (unlike a
+// title="..." tooltip, which only opens on hover and never fires on mobile
+// tap), so this stays a plain server-rendered component.
+function InfoTooltip({ text }: { text: string }) {
+  return (
+    <details className="relative inline-block">
+      <summary className="cursor-help list-none text-xs text-zinc-400 [&::-webkit-details-marker]:hidden">
+        &#9432;
+      </summary>
+      <span className="absolute left-0 top-5 z-10 w-56 rounded-md border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-normal normal-case tracking-normal text-zinc-600 shadow-md">
+        {text}
+      </span>
+    </details>
+  );
+}
+
 function batchHeadline(b: BatchRequirement): string {
   const yieldQty = b.batchesNeeded * b.recipeOzYieldQty;
   if (b.category === "beans") return `Roast ${Math.round(yieldQty / 16)} lbs`;
@@ -151,7 +168,7 @@ export default async function ProductionPage() {
             {popupItems.map((item) => {
               const t = popupTotals.get(item)!;
               return (
-                <li key={item} className="flex items-center justify-between px-4 py-2 text-sm">
+                <li key={item} className="flex items-center justify-between gap-4 px-4 py-2 text-sm">
                   <span className="text-zinc-900">{item}</span>
                   <span className="text-zinc-500">
                     {t.displayQty !== null ? roundDisplay(t.displayQty) : `${ceilDisplay(t.oz)} oz`}
@@ -172,7 +189,7 @@ export default async function ProductionPage() {
         ) : (
           <ul className="divide-y divide-zinc-100">
             {clientSorted.map((line, i) => (
-              <li key={`${line.customer}-${line.item}-${i}`} className="flex items-center justify-between px-4 py-2 text-sm">
+              <li key={`${line.customer}-${line.item}-${i}`} className="flex items-center justify-between gap-4 px-4 py-2 text-sm">
                 <span className="text-zinc-900">{line.customer}</span>
                 <span className="text-zinc-500">
                   {line.quantityUnit === "oz" ? (
@@ -198,7 +215,7 @@ export default async function ProductionPage() {
           </h2>
           <ul className="divide-y divide-zinc-100">
             {plan.upcomingDemand.map((line, i) => (
-              <li key={`${line.customer}-${line.item}-${i}`} className="flex items-center justify-between px-4 py-2 text-sm">
+              <li key={`${line.customer}-${line.item}-${i}`} className="flex items-center justify-between gap-4 px-4 py-2 text-sm">
                 <span className="text-zinc-700">{line.customer}</span>
                 <span className="text-zinc-400">
                   {line.quantityUnit === "oz" ? (
@@ -241,12 +258,7 @@ export default async function ProductionPage() {
 
       <div className="mt-8 flex items-center gap-1.5">
         <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400">To make Mon/Tue</p>
-        <span
-          className="cursor-help text-xs text-zinc-400"
-          title="Tops up reserve stock and covers this week's Midwife popup and client deliveries"
-        >
-          &#9432;
-        </span>
+        <InfoTooltip text="Tops up reserve stock and covers this week's Midwife popup and client deliveries" />
       </div>
 
       {byCategory.get("concentrate") && (
