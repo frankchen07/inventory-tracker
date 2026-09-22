@@ -136,6 +136,7 @@ function standingOrderDemandLine(order: StandingOrder, weekStart: string): Deman
     channel: order.channel,
     oz: 0, // filled in by fillOz() once product sizes are known
     displayQty: null, // filled in by fillOz()
+    displayUnit: null, // filled in by fillOz()
   };
 }
 
@@ -231,6 +232,7 @@ export function getDemandForWindow(
         channel: order.channel,
         oz: 0,
         displayQty: null,
+        displayUnit: null,
       });
     }
   }
@@ -306,6 +308,7 @@ export async function computeProductionPlan(): Promise<ProductionPlan> {
     list.push(p);
     productsByRecipe.set(p.source, list);
   }
+  const amtUnitByEntity = new Map(stockEntities.map((e) => [e.entity, e.amtUnit]));
 
   // A reserve entity's own oz size — recipe entities are already oz-native,
   // product entities convert through that product's own physical size.
@@ -330,12 +333,14 @@ export async function computeProductionPlan(): Promise<ProductionPlan> {
       if (line.quantityUnit === "oz") {
         const sourced = productsByRecipe.get(line.item) ?? [];
         const displayQty = sourced.length === 1 && sourced[0].unitOz > 0 ? line.quantity / sourced[0].unitOz : null;
-        return { ...line, oz: line.quantity, displayQty };
+        const displayUnit = displayQty !== null ? amtUnitByEntity.get(sourced[0].product) ?? null : null;
+        return { ...line, oz: line.quantity, displayQty, displayUnit };
       }
       return {
         ...line,
         oz: (productByName.get(line.item)?.unitOz ?? 0) * line.quantity,
         displayQty: line.quantity,
+        displayUnit: amtUnitByEntity.get(line.item) ?? null,
       };
     });
   }

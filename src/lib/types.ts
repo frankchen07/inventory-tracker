@@ -115,6 +115,11 @@ export interface DemandLine {
   // could apply (e.g. espresso ccx has three differently-sized products, so
   // there's no single right answer — display falls back to raw oz instead).
   displayQty: number | null;
+  // The friendly unit name for displayQty (e.g. "kegs", "bottles"), sourced
+  // from the matching product's "reserve stock" row (ReserveLevel.amtUnit) —
+  // null whenever displayQty is null, and also null if that product has no
+  // reserve-stock row to draw a unit name from (falls back to a bare number).
+  displayUnit: string | null;
 }
 
 // How much of one recipe product is needed this week, and how many batches

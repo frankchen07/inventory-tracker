@@ -125,12 +125,20 @@ export default async function ProductionPage() {
   const popupLines = plan.demand.filter((l) => l.channel === "popup");
   const clientLines = plan.demand.filter((l) => l.channel !== "popup");
 
-  const popupTotals = new Map<string, { oz: number; displayQty: number | null }>();
+  // displayUnit is taken from whichever line for an item is seen first and
+  // never re-derived per line — safe because it depends only on `item`
+  // (via amtUnitByEntity/productsByRecipe in fillOz(), fixed per plan), so
+  // every line sharing an item necessarily agrees, *unless* a product name
+  // and a recipe name were to collide (not expected — they're distinct
+  // sheets/columns in practice). Same pre-existing assumption `oz`/
+  // `displayQty` summation above already relies on for `item` grouping.
+  const popupTotals = new Map<string, { oz: number; displayQty: number | null; displayUnit: string | null }>();
   for (const line of popupLines) {
-    const prior = popupTotals.get(line.item) ?? { oz: 0, displayQty: 0 };
+    const prior = popupTotals.get(line.item) ?? { oz: 0, displayQty: 0, displayUnit: line.displayUnit };
     popupTotals.set(line.item, {
       oz: prior.oz + line.oz,
       displayQty: prior.displayQty === null || line.displayQty === null ? null : prior.displayQty + line.displayQty,
+      displayUnit: prior.displayUnit,
     });
   }
   const popupItems = [...popupTotals.keys()].sort((a, b) => a.localeCompare(b));
@@ -171,7 +179,9 @@ export default async function ProductionPage() {
                 <li key={item} className="flex items-center justify-between gap-4 px-4 py-2 text-sm">
                   <span className="text-zinc-900">{item}</span>
                   <span className="text-zinc-500">
-                    {t.displayQty !== null ? roundDisplay(t.displayQty) : `${ceilDisplay(t.oz)} oz`}
+                    {t.displayQty !== null
+                      ? `${roundDisplay(t.displayQty)}${t.displayUnit ? ` ${t.displayUnit}` : ""}`
+                      : `${ceilDisplay(t.oz)} oz`}
                   </span>
                 </li>
               );
