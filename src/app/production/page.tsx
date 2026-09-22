@@ -46,31 +46,25 @@ function batchHeadline(b: BatchRequirement): string {
 // Reserve rows show a friendly, fractional native unit as the primary figure
 // wherever one exists (a product's own kegs/bottles, or — for "beans"
 // recipes — pounds), with oz kept only as a secondary reference when it's
-// not already redundant with the primary. topUpQty is always in the row's
-// own native unit already (entered that way in the reserve-stock sheet), so
-// "need" reads directly off it rather than being reconverted from oz.
-function reserveRowDisplay(r: ReserveLevel): { primary: string; secondary: string | null; need: string | null } {
+// not already redundant with the primary. This is a pure on-hand-vs-target
+// snapshot — the actionable "how much to make" figure lives in "Also make"/
+// "To make Mon/Tue" instead, so no shortfall figure is shown here.
+function reserveRowDisplay(r: ReserveLevel): { primary: string; secondary: string | null } {
   if (r.entityType === "product") {
     return {
       primary: `${r.onHand} / ${r.amt} ${r.amtUnit}`,
       secondary: `${ceilDisplay(r.onHandOz)} / ${ceilDisplay(r.amtOz)} oz`,
-      need: r.topUpQty > 0 ? `need ${roundDisplay(r.topUpQty)} ${r.amtUnit}` : null,
     };
   }
   if (r.category === "beans") {
     return {
       primary: `${roundDisplay(r.onHand / 16)} / ${roundDisplay(r.amt / 16)} lbs`,
       secondary: `${ceilDisplay(r.onHandOz)} / ${ceilDisplay(r.amtOz)} oz`,
-      need: r.topUpQty > 0 ? `need ${roundDisplay(r.topUpQty / 16)} lbs` : null,
     };
   }
   return {
     primary: `${r.onHand} / ${r.amt} ${r.amtUnit}`,
     secondary: null,
-    // Recipe entities are oz-native (reserveUnitOz === 1 in production.ts),
-    // so topUpQty is already in oz here — same figure as amtOz - onHandOz,
-    // just read directly instead of recomputed.
-    need: r.topUpQty > 0 ? `need ${ceilDisplay(r.topUpQty)} oz` : null,
   };
 }
 
@@ -231,14 +225,13 @@ export default async function ProductionPage() {
         </div>
         <ul className="divide-y divide-zinc-100">
           {plan.reserveLevels.map((r) => {
-            const { primary, secondary, need } = reserveRowDisplay(r);
+            const { primary, secondary } = reserveRowDisplay(r);
             return (
               <li key={r.entity} className="flex items-center justify-between gap-4 px-4 py-2 text-sm">
                 <span className="text-zinc-900">{r.entity}</span>
                 <span className={r.topUpQty > 0 ? "font-medium text-amber-700" : "text-zinc-500"}>
                   {primary}
                   {secondary && <> <span className="text-zinc-400">({secondary})</span></>}
-                  {need ? ` · ${need}` : ""}
                 </span>
               </li>
             );
@@ -246,7 +239,15 @@ export default async function ProductionPage() {
         </ul>
       </div>
 
-      <p className="mt-8 text-xs font-semibold uppercase tracking-wide text-zinc-400">To make Mon/Tue</p>
+      <div className="mt-8 flex items-center gap-1.5">
+        <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400">To make Mon/Tue</p>
+        <span
+          className="cursor-help text-xs text-zinc-400"
+          title="Tops up reserve stock and covers this week's Midwife popup and client deliveries"
+        >
+          &#9432;
+        </span>
+      </div>
 
       {byCategory.get("concentrate") && (
         <div className="mt-2 rounded-lg border border-zinc-200">
@@ -283,7 +284,10 @@ export default async function ProductionPage() {
             {plan.productRequirements.map((p) => (
               <li key={p.product} className="flex items-center justify-between gap-4 px-4 py-3 text-sm">
                 <span className="font-medium text-zinc-900">{p.product}</span>
-                <span className="text-zinc-900">Make {ceilDisplay(p.totalQty)}</span>
+                <span className="text-zinc-900">
+                  Make {ceilDisplay(p.totalQty)}{" "}
+                  <span className="text-zinc-400">({ceilDisplay(p.totalOz)} oz)</span>
+                </span>
               </li>
             ))}
           </ul>

@@ -403,7 +403,8 @@ export async function computeProductionPlan(): Promise<ProductionPlan> {
     const topUpQty = topUpByEntity.get(entity.entity) ?? 0;
     const totalQty = Math.max(0, entity.amt + demandQty - onHand);
     if (totalQty > 0) {
-      productRequirements.push({ product: entity.entity, demandQty, topUpQty, totalQty });
+      const totalOz = totalQty * (product?.ozSourceNeeded ?? 0);
+      productRequirements.push({ product: entity.entity, demandQty, topUpQty, totalQty, totalOz });
     }
     if (product) {
       rawOzByRecipe.set(product.source, (rawOzByRecipe.get(product.source) ?? 0) + totalQty * product.ozSourceNeeded);

@@ -182,6 +182,10 @@ export interface ProductRequirement {
   // max(0, target + demandQty - onHand) — NOT demandQty + topUpQty, since
   // that would double-count demand already covered by on-hand stock.
   totalQty: number;
+  // totalQty converted to oz of source recipe consumed (totalQty *
+  // product.ozSourceNeeded) — the same oz figure this requirement folds
+  // into its source recipe's raw need, shown for display context.
+  totalOz: number;
 }
 
 // windowStart/windowEnd are a rolling ~9-day capture window starting today
