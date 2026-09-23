@@ -30,6 +30,16 @@ function roundDisplay(n: number): number {
   return Math.round(n * 10) / 10;
 }
 
+// Every product name in this app already ends in a natural countable noun
+// ("nitro keg", "espresso ccx pouch", "vanilla syrup bottle"), so a friendly
+// unit word for a delivery line can be derived from the item name itself
+// (its last word) instead of needing a dedicated sheet column — mirrors the
+// singularizing logic in unit-conversion.ts's normalizeUnit(), just inverted.
+function pluralize(word: string): string {
+  if (/[sxz]$/.test(word) || /[cs]h$/.test(word)) return word + "es";
+  return word + "s";
+}
+
 function formatDayLabel(date: string): string {
   const [y, m, d] = date.split("-").map(Number);
   const weekday = new Date(y, m - 1, d).toLocaleDateString("en-US", { weekday: "short" });
@@ -205,20 +215,19 @@ export default async function ProductionPage() {
                 <span className="text-zinc-500">
                   {line.quantityUnit === "oz" ? (
                     line.recipeCategory === "beans" ? (
-                      <>
-                        {line.item} &times; {roundDisplay(line.oz / 16)} lbs{" "}
-                        <span className="text-zinc-400">({ceilDisplay(line.oz)} oz)</span>
-                      </>
+                      <>{line.item} &times; {roundDisplay(line.oz / 16)} lbs</>
                     ) : (
                       <>{line.item} <span className="text-zinc-400">({ceilDisplay(line.oz)} oz)</span></>
                     )
                   ) : (
                     <>
                       {line.item} &times; {line.quantity}{" "}
-                      <span className="text-zinc-400">({ceilDisplay(line.oz)} oz)</span>
+                      {line.quantity === 1
+                        ? line.item.trim().split(" ").pop()
+                        : pluralize(line.item.trim().split(" ").pop()!)}
                     </>
                   )}{" "}
-                  <span className="text-zinc-400">({formatDayLabel(line.forDate)})</span>
+                  <span className="text-zinc-400">(due {formatDayLabel(line.forDate)})</span>
                 </span>
               </li>
             ))}
