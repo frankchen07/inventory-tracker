@@ -5,9 +5,7 @@ import type { BatchRequirement, DemandLine, ReserveLevel } from "@/lib/types";
 export const dynamic = "force-dynamic";
 
 const CATEGORY_LABEL: Record<string, string> = {
-  concentrate: "Brew concentrate",
-  beans: "Roast beans",
-  ingredient: "Make ingredients",
+  beans: "Roast Beans",
   purchase: "Purchase",
 };
 
@@ -75,8 +73,9 @@ function batchHeadline(b: BatchRequirement): string {
 // whatever's natural for that entity), with the converted oz total as a
 // secondary reference — dropped only when amtUnit already is oz, since
 // showing it twice would be redundant. This is a pure on-hand-vs-target
-// snapshot — the actionable "how much to make" figure lives in "Also make"/
-// "To make Mon/Tue" instead, so no shortfall figure is shown here.
+// snapshot — the actionable "how much to make" figure lives in "Assemble
+// Products"/"Brewing & Roasting Needed" instead, so no shortfall figure is
+// shown here.
 function reserveRowDisplay(r: ReserveLevel): { primary: string; secondary: string | null } {
   const isOz = ["oz", "ounce", "ounces"].includes(r.amtUnit.trim().toLowerCase());
   return {
@@ -107,10 +106,11 @@ export default async function ProductionPage() {
     byCategory.set(b.category, list);
   }
 
-  // Everything except concentrate/ingredient (which have fixed positions
-  // around "Also make" below) renders here, in CATEGORY_ORDER's preference
-  // order, then anything else alphabetically — so a category nobody's
-  // labeled yet still shows up instead of silently disappearing.
+  // Everything except concentrate/ingredient (merged into the fixed-position
+  // "Make Recipes" section, just above "Assemble Products", below) renders
+  // here, in CATEGORY_ORDER's preference order, then anything else
+  // alphabetically — so a category nobody's labeled yet still shows up
+  // instead of silently disappearing.
   const trailingCategories = [...byCategory.keys()]
     .filter((c) => c !== "concentrate" && c !== "ingredient")
     .sort((a, b) => {
@@ -173,10 +173,10 @@ export default async function ProductionPage() {
         </Link>
       </div>
 
-      <p className="mt-8 text-xs font-semibold uppercase tracking-wide text-zinc-400">This week</p>
+      <p className="mt-8 text-base font-bold uppercase tracking-wide text-zinc-800">This week</p>
       <div className="mt-2 rounded-lg border border-zinc-200">
         <h2 className="border-b border-zinc-200 bg-zinc-50 px-4 py-2 text-sm font-semibold text-zinc-900">
-          This week&apos;s Midwife popup
+          Midwife Popup
         </h2>
         {popupItems.length === 0 ? (
           <p className="px-4 py-3 text-sm text-zinc-500">Nothing planned for the popup this week.</p>
@@ -203,7 +203,7 @@ export default async function ProductionPage() {
 
       <div className="mt-6 rounded-lg border border-zinc-200">
         <h2 className="border-b border-zinc-200 bg-zinc-50 px-4 py-2 text-sm font-semibold text-zinc-900">
-          This week&apos;s deliveries &amp; events
+          Deliveries &amp; Events
         </h2>
         {clientSorted.length === 0 ? (
           <p className="px-4 py-3 text-sm text-zinc-500">Nothing scheduled for clients this week.</p>
@@ -222,9 +222,7 @@ export default async function ProductionPage() {
                   ) : (
                     <>
                       {line.item} &times; {line.quantity}{" "}
-                      {line.quantity === 1
-                        ? line.item.trim().split(" ").pop()
-                        : pluralize(line.item.trim().split(" ").pop()!)}
+                      {pluralize(line.item.trim().split(" ").pop()!)}
                     </>
                   )}{" "}
                   <span className="text-zinc-400">(due {formatDayLabel(line.forDate)})</span>
@@ -261,12 +259,9 @@ export default async function ProductionPage() {
       )}
 
       <div className="mt-6 rounded-lg border border-zinc-200">
-        <div className="flex items-center justify-between border-b border-zinc-200 bg-zinc-50 px-4 py-2">
-          <h2 className="text-sm font-semibold text-zinc-900">Reserve</h2>
-          <Link href="/production/reserve-count" className="text-xs font-medium text-zinc-500 hover:text-zinc-900">
-            Log count
-          </Link>
-        </div>
+        <h2 className="border-b border-zinc-200 bg-zinc-50 px-4 py-2 text-sm font-semibold text-zinc-900">
+          Boast Reserves
+        </h2>
         <ul className="divide-y divide-zinc-100">
           {plan.reserveLevels.map((r) => {
             const { primary, secondary } = reserveRowDisplay(r);
@@ -283,31 +278,18 @@ export default async function ProductionPage() {
         </ul>
       </div>
 
-      <div className="mt-8 flex items-center gap-1.5">
-        <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400">To make Mon/Tue</p>
+      <div className="mt-10 flex items-center gap-1.5 border-t border-zinc-200 pt-6">
+        <p className="text-base font-bold uppercase tracking-wide text-zinc-800">Brewing &amp; Roasting Needed</p>
         <InfoTooltip text="Tops up reserve stock and covers this week's Midwife popup and client deliveries" />
       </div>
 
-      {byCategory.get("concentrate") && (
+      {(byCategory.get("concentrate") || byCategory.get("ingredient")) && (
         <div className="mt-2 rounded-lg border border-zinc-200">
           <h2 className="border-b border-zinc-200 bg-zinc-50 px-4 py-2 text-sm font-semibold text-zinc-900">
-            {CATEGORY_LABEL.concentrate}
+            Make Recipes
           </h2>
           <ul className="divide-y divide-zinc-100">
-            {byCategory.get("concentrate")!.map((b) => (
-              <BatchCard key={b.recipe} b={b} />
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {byCategory.get("ingredient") && (
-        <div className="mt-6 rounded-lg border border-zinc-200">
-          <h2 className="border-b border-zinc-200 bg-zinc-50 px-4 py-2 text-sm font-semibold text-zinc-900">
-            {CATEGORY_LABEL.ingredient}
-          </h2>
-          <ul className="divide-y divide-zinc-100">
-            {byCategory.get("ingredient")!.map((b) => (
+            {[...(byCategory.get("concentrate") ?? []), ...(byCategory.get("ingredient") ?? [])].map((b) => (
               <BatchCard key={b.recipe} b={b} />
             ))}
           </ul>
@@ -317,7 +299,7 @@ export default async function ProductionPage() {
       {plan.productRequirements.length > 0 && (
         <div className="mt-6 rounded-lg border border-zinc-200">
           <h2 className="border-b border-zinc-200 bg-zinc-50 px-4 py-2 text-sm font-semibold text-zinc-900">
-            Also make
+            Assemble Products
           </h2>
           <ul className="divide-y divide-zinc-100">
             {plan.productRequirements.map((p) => (

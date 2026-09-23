@@ -12,8 +12,6 @@ import {
   readRows,
   listDateColumns,
   readColumnValues,
-  getOrCreateDateColumn,
-  writeColumnValues,
 } from "@/lib/sheets";
 import type {
   Recipe,
@@ -232,17 +230,6 @@ export async function getLatestProductionStock(): Promise<Map<string, number>> {
     });
   }
   return result;
-}
-
-// Mirrors writeCountColumn() in inventory.ts: writes a new (or updates an
-// existing) date column. `valuesByEntity` should only contain entities
-// actually recounted this time — everything else is left blank so
-// getLatestProductionStock() carries the prior value forward at read time.
-export async function writeReserveCountColumn(date: string, valuesByEntity: Map<string, string>): Promise<void> {
-  const entities = await getProductionStockEntities();
-  const colIndex = await getOrCreateDateColumn(date, RESERVE_STOCK_SHEET, RESERVE_STOCK_HEADERS.length);
-  const values = entities.map((e) => valuesByEntity.get(e.entity) ?? "");
-  await writeColumnValues(colIndex, values, RESERVE_STOCK_SHEET);
 }
 
 // Standing orders that are active, in-phase for this week (isDueThisWeek —

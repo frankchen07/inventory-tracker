@@ -44,9 +44,6 @@ Six tabs, each a flat table with a header row (no numeric IDs — everything is 
 - **`/production`** — this week's plan: what's needed for the Wed–Sat popup/deliveries, current
   reserve levels, and what to brew/roast/make Mon/Tue to cover it. Always computed off *this*
   calendar week — reopening it later in the week doesn't change what window it's planning for.
-- **`/production/reserve-count`** — log a physical count of reserve stock (kegs, buckets,
-  bottles on hand); leave an entity blank if you didn't recount it and its last count carries
-  forward, same as inventory counts.
 
 Editing `recipes`/`products`/`standing orders`/`reserve stock` directly in the sheet is expected
 day-to-day — the app never needs a code change for a new product or a renamed recipe, only
