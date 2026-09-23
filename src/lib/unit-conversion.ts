@@ -9,7 +9,7 @@ export interface UnitLevel {
   perAtomic: number;
 }
 
-function normalizeUnit(word: string): string {
+export function normalizeUnit(word: string): string {
   const w = word.toLowerCase();
   if (/[xsz]es$/.test(w) || /[cs]hes$/.test(w)) return w.slice(0, -2);
   if (w.endsWith("s") && w.length > 1) return w.slice(0, -1);

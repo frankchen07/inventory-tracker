@@ -60,28 +60,18 @@ function batchHeadline(b: BatchRequirement): string {
   return `Make ${b.batchesNeeded} batch${b.batchesNeeded === 1 ? "" : "es"}`;
 }
 
-// Reserve rows show a friendly, fractional native unit as the primary figure
-// wherever one exists (a product's own kegs/bottles, or — for "beans"
-// recipes — pounds), with oz kept only as a secondary reference when it's
-// not already redundant with the primary. This is a pure on-hand-vs-target
+// Reserve rows show exactly the colloquial amount/unit Frank wrote in the
+// "reserve stock" sheet as the primary figure (kegs, bottles, lbs, gallons —
+// whatever's natural for that entity), with the converted oz total as a
+// secondary reference — dropped only when amtUnit already is oz, since
+// showing it twice would be redundant. This is a pure on-hand-vs-target
 // snapshot — the actionable "how much to make" figure lives in "Also make"/
 // "To make Mon/Tue" instead, so no shortfall figure is shown here.
 function reserveRowDisplay(r: ReserveLevel): { primary: string; secondary: string | null } {
-  if (r.entityType === "product") {
-    return {
-      primary: `${r.onHand} / ${r.amt} ${r.amtUnit}`,
-      secondary: `${ceilDisplay(r.onHandOz)} / ${ceilDisplay(r.amtOz)} oz`,
-    };
-  }
-  if (r.category === "beans") {
-    return {
-      primary: `${roundDisplay(r.onHand / 16)} / ${roundDisplay(r.amt / 16)} lbs`,
-      secondary: `${ceilDisplay(r.onHandOz)} / ${ceilDisplay(r.amtOz)} oz`,
-    };
-  }
+  const isOz = ["oz", "ounce", "ounces"].includes(r.amtUnit.trim().toLowerCase());
   return {
     primary: `${r.onHand} / ${r.amt} ${r.amtUnit}`,
-    secondary: null,
+    secondary: isOz ? null : `${ceilDisplay(r.onHandOz)} / ${ceilDisplay(r.amtOz)} oz`,
   };
 }
 
@@ -89,7 +79,7 @@ function BatchCard({ b }: { b: BatchRequirement }) {
   const headline = batchHeadline(b);
   return (
     <li className="flex items-center justify-between gap-4 px-4 py-3 text-sm">
-      <span className="font-medium text-zinc-900">{b.recipeProduct}</span>
+      <span className="font-medium text-zinc-900">{b.recipe}</span>
       <span className="text-zinc-900">
         {headline} <span className="text-zinc-400">({ceilDisplay(b.totalNeededQty)} {b.unit} needed)</span>
       </span>
@@ -132,13 +122,22 @@ export default async function ProductionPage() {
   // and a recipe name were to collide (not expected — they're distinct
   // sheets/columns in practice). Same pre-existing assumption `oz`/
   // `displayQty` summation above already relies on for `item` grouping.
-  const popupTotals = new Map<string, { oz: number; displayQty: number | null; displayUnit: string | null }>();
+  const popupTotals = new Map<
+    string,
+    { oz: number; displayQty: number | null; displayUnit: string | null; recipeCategory: string | null }
+  >();
   for (const line of popupLines) {
-    const prior = popupTotals.get(line.item) ?? { oz: 0, displayQty: 0, displayUnit: line.displayUnit };
+    const prior = popupTotals.get(line.item) ?? {
+      oz: 0,
+      displayQty: 0,
+      displayUnit: line.displayUnit,
+      recipeCategory: line.recipeCategory,
+    };
     popupTotals.set(line.item, {
       oz: prior.oz + line.oz,
       displayQty: prior.displayQty === null || line.displayQty === null ? null : prior.displayQty + line.displayQty,
       displayUnit: prior.displayUnit,
+      recipeCategory: prior.recipeCategory,
     });
   }
   const popupItems = [...popupTotals.keys()].sort((a, b) => a.localeCompare(b));
@@ -181,7 +180,9 @@ export default async function ProductionPage() {
                   <span className="text-zinc-500">
                     {t.displayQty !== null
                       ? `${roundDisplay(t.displayQty)}${t.displayUnit ? ` ${t.displayUnit}` : ""}`
-                      : `${ceilDisplay(t.oz)} oz`}
+                      : t.recipeCategory === "beans"
+                        ? `${roundDisplay(t.oz / 16)} lbs`
+                        : `${ceilDisplay(t.oz)} oz`}
                   </span>
                 </li>
               );
@@ -203,7 +204,14 @@ export default async function ProductionPage() {
                 <span className="text-zinc-900">{line.customer}</span>
                 <span className="text-zinc-500">
                   {line.quantityUnit === "oz" ? (
-                    <>{line.item} <span className="text-zinc-400">({ceilDisplay(line.oz)} oz)</span></>
+                    line.recipeCategory === "beans" ? (
+                      <>
+                        {line.item} &times; {roundDisplay(line.oz / 16)} lbs{" "}
+                        <span className="text-zinc-400">({ceilDisplay(line.oz)} oz)</span>
+                      </>
+                    ) : (
+                      <>{line.item} <span className="text-zinc-400">({ceilDisplay(line.oz)} oz)</span></>
+                    )
                   ) : (
                     <>
                       {line.item} &times; {line.quantity}{" "}
@@ -278,7 +286,7 @@ export default async function ProductionPage() {
           </h2>
           <ul className="divide-y divide-zinc-100">
             {byCategory.get("concentrate")!.map((b) => (
-              <BatchCard key={b.recipeProduct} b={b} />
+              <BatchCard key={b.recipe} b={b} />
             ))}
           </ul>
         </div>
@@ -291,7 +299,7 @@ export default async function ProductionPage() {
           </h2>
           <ul className="divide-y divide-zinc-100">
             {byCategory.get("ingredient")!.map((b) => (
-              <BatchCard key={b.recipeProduct} b={b} />
+              <BatchCard key={b.recipe} b={b} />
             ))}
           </ul>
         </div>
@@ -323,7 +331,7 @@ export default async function ProductionPage() {
           </h2>
           <ul className="divide-y divide-zinc-100">
             {byCategory.get(category)!.map((b) => (
-              <BatchCard key={b.recipeProduct} b={b} />
+              <BatchCard key={b.recipe} b={b} />
             ))}
           </ul>
         </div>

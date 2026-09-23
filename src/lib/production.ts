@@ -27,6 +27,58 @@ import type {
   ProductRequirement,
   ProductionPlan,
 } from "@/lib/types";
+import { normalizeUnit } from "@/lib/unit-conversion";
+
+// Universal physical-unit conversions for reserve-stock entities of type
+// "recipe" (bulk goods with no single packaged product to size-convert
+// through, e.g. "6 gallons" of concentrate or "100 lbs" of roast) — unlike
+// "kegs"/"bottles", these units mean the same oz regardless of which recipe
+// they're attached to, so a fixed table (not a per-product lookup) is
+// correct here. Frank writes the colloquial amount directly into the
+// "reserve stock" sheet's amt/amtUnit columns; this is what makes that
+// number trustworthy for real production math instead of just a display
+// label. An amtUnit not found here (including "oz" itself) is assumed to
+// already be oz — same fail-open convention used elsewhere in this file.
+const RECIPE_UNIT_OZ: Record<string, number> = {
+  oz: 1,
+  ounce: 1,
+  lb: 16,
+  pound: 16,
+  gallon: 128,
+  gal: 128,
+};
+
+// Resolves a standing/one-off order row's raw sheet quantity+quantityUnit
+// (e.g. "2"/"lbs") into a real DemandLine quantity+quantityUnit, once `item`
+// is known to name either a product or a recipe directly. "oz" always means
+// raw oz already. Otherwise, only a *recipe*-direct item (no packaged
+// product in between) can sensibly use a universal unit like "lbs"/
+// "gallons" — a product-direct item (kegs, bottles) is already unambiguous
+// as a plain count of that product's own known size, so any other word
+// written there (including "kegs"/"gallons") is just a readable label and
+// falls through to "count" untouched, same as blank always has. Mirrors
+// reserveUnitOz()'s exact shape for the same reason: oz passthrough →
+// universal table lookup for recipe-direct items → warn instead of silently
+// mis-resolving, since a dropped order is a worse failure than a loud one.
+function resolveQuantity(
+  item: string,
+  rawQuantity: number,
+  rawUnit: string,
+  recipeNames: Set<string>,
+): { quantity: number; quantityUnit: "count" | "oz" } {
+  const unit = normalizeUnit(rawUnit.trim().toLowerCase());
+  if (unit === "oz" || unit === "ounce") return { quantity: rawQuantity, quantityUnit: "oz" };
+  if (recipeNames.has(item.trim())) {
+    const factor = RECIPE_UNIT_OZ[unit];
+    if (factor !== undefined) return { quantity: rawQuantity * factor, quantityUnit: "oz" };
+    if (unit !== "" && unit !== "count") {
+      console.warn(
+        `Unrecognized quantityUnit "${rawUnit}" for recipe-direct item "${item}" — treating as count (will likely fail to match any product)`,
+      );
+    }
+  }
+  return { quantity: rawQuantity, quantityUnit: "count" };
+}
 
 // Brewing/roasting happens Monday/Tuesday; usage, keg delivery, and
 // espresso-concentrate delivery all happen Wednesday-Saturday of that same
@@ -65,7 +117,7 @@ export function mondayOfWeek(date: string): string {
 export async function getRecipes(): Promise<Recipe[]> {
   const rows = await readRows(RECIPES_SHEET, RECIPES_HEADERS);
   return rows.map((r) => ({
-    recipeProduct: r.recipeProduct,
+    recipe: r.recipe,
     category: r.category,
     recipeOzYieldQty: Number(r.recipeOzYieldQty) || 0,
   }));
@@ -74,18 +126,14 @@ export async function getRecipes(): Promise<Recipe[]> {
 export async function getProducts(): Promise<Product[]> {
   const rows = await readRows(PRODUCTS_SHEET, PRODUCTS_HEADERS);
   return rows.map((r) => {
-    const ozSourceNeeded = Number(r.ozSourceNeeded) || 0;
+    const ozRecipeSourceNeeded = Number(r.ozRecipeSourceNeeded) || 0;
     return {
       product: r.product,
-      source: r.source,
-      ozSourceNeeded,
-      unitOz: r.unitOz.trim() === "" ? ozSourceNeeded : Number(r.unitOz) || ozSourceNeeded,
+      recipeSource: r.recipeSource,
+      ozRecipeSourceNeeded,
+      unitOz: r.unitOz.trim() === "" ? ozRecipeSourceNeeded : Number(r.unitOz) || ozRecipeSourceNeeded,
     };
   });
-}
-
-function parseQuantityUnit(v: string): "count" | "oz" {
-  return v.trim().toLowerCase() === "oz" ? "oz" : "count";
 }
 
 export async function getStandingOrders(): Promise<StandingOrder[]> {
@@ -94,7 +142,7 @@ export async function getStandingOrders(): Promise<StandingOrder[]> {
     customer: r.customer,
     item: r.item,
     quantity: Number(r.quantity) || 0,
-    quantityUnit: parseQuantityUnit(r.quantityUnit),
+    quantityUnit: r.quantityUnit.trim(),
     dayOfWeek: r.dayOfWeek,
     active: r.active.trim().toUpperCase() === "TRUE",
     channel: r.channel.trim().toLowerCase() === "popup" ? "popup" : "client",
@@ -124,19 +172,21 @@ function isDueThisWeek(order: StandingOrder, popupWeekStart: string): boolean {
 // Wednesday (weekStart) — used both for this week's real demand and for
 // next week's look-ahead notice, so the two never drift apart in shape.
 // Returns null if dayOfWeek doesn't match anything in the Wed-Sat window.
-function standingOrderDemandLine(order: StandingOrder, weekStart: string): DemandLine | null {
+function standingOrderDemandLine(order: StandingOrder, weekStart: string, recipeNames: Set<string>): DemandLine | null {
   const dayIndex = WINDOW_DAYS.findIndex((d) => d.toLowerCase() === order.dayOfWeek.trim().toLowerCase());
   if (dayIndex === -1) return null;
+  const { quantity, quantityUnit } = resolveQuantity(order.item, order.quantity, order.quantityUnit, recipeNames);
   return {
     customer: order.customer,
     item: order.item,
-    quantity: order.quantity,
-    quantityUnit: order.quantityUnit,
+    quantity,
+    quantityUnit,
     forDate: addDays(weekStart, dayIndex),
     channel: order.channel,
     oz: 0, // filled in by fillOz() once product sizes are known
     displayQty: null, // filled in by fillOz()
     displayUnit: null, // filled in by fillOz()
+    recipeCategory: null, // filled in by fillOz()
   };
 }
 
@@ -147,7 +197,7 @@ export async function getOneOffOrders(): Promise<OneOffOrder[]> {
     customer: r.customer,
     item: r.item,
     quantity: Number(r.quantity) || 0,
-    quantityUnit: parseQuantityUnit(r.quantityUnit),
+    quantityUnit: r.quantityUnit.trim(),
     notes: r.notes,
     channel: r.channel.trim().toLowerCase() === "popup" ? "popup" : "client",
     active: r.active.trim().toUpperCase() === "TRUE",
@@ -212,27 +262,30 @@ export function getDemandForWindow(
   popupWeekStart: string,
   windowStart: string,
   windowEnd: string,
+  recipeNames: Set<string>,
 ): DemandLine[] {
   const demand: DemandLine[] = [];
   for (const order of standing) {
     if (!order.active) continue;
     if (!isDueThisWeek(order, popupWeekStart)) continue;
-    const line = standingOrderDemandLine(order, popupWeekStart);
+    const line = standingOrderDemandLine(order, popupWeekStart, recipeNames);
     if (line) demand.push(line);
   }
   for (const order of oneOff) {
     if (!order.active) continue;
     if (order.date >= windowStart && order.date <= windowEnd) {
+      const { quantity, quantityUnit } = resolveQuantity(order.item, order.quantity, order.quantityUnit, recipeNames);
       demand.push({
         customer: order.customer,
         item: order.item,
-        quantity: order.quantity,
-        quantityUnit: order.quantityUnit,
+        quantity,
+        quantityUnit,
         forDate: order.date,
         channel: order.channel,
         oz: 0,
         displayQty: null,
         displayUnit: null,
+        recipeCategory: null,
       });
     }
   }
@@ -248,7 +301,11 @@ export function getDemandForWindow(
 // actually gets *produced* this week to cover next week's periodic demand
 // would double-count that order's oz (once as an early "preview" this week,
 // then again for real next week).
-export function getUpcomingStandingDemand(standing: StandingOrder[], popupWeekStart: string): DemandLine[] {
+export function getUpcomingStandingDemand(
+  standing: StandingOrder[],
+  popupWeekStart: string,
+  recipeNames: Set<string>,
+): DemandLine[] {
   const nextWeekStart = addDays(popupWeekStart, 7);
 
   const upcoming: DemandLine[] = [];
@@ -256,14 +313,14 @@ export function getUpcomingStandingDemand(standing: StandingOrder[], popupWeekSt
     if (!order.active || order.intervalWeeks <= 1) continue;
     if (isDueThisWeek(order, popupWeekStart)) continue; // already showing in this week's demand
     if (!isDueThisWeek(order, nextWeekStart)) continue;
-    const line = standingOrderDemandLine(order, nextWeekStart);
+    const line = standingOrderDemandLine(order, nextWeekStart, recipeNames);
     if (line) upcoming.push(line);
   }
   upcoming.sort((a, b) => a.forDate.localeCompare(b.forDate) || a.customer.localeCompare(b.customer));
   return upcoming;
 }
 
-// Resolves each demand line to its recipe via `products.source`, then nets
+// Resolves each demand line to its recipe via `products.recipeSource`, then nets
 // demand against on-hand reserve stock at *both* levels before converting to
 // whole batches — a product's demand nets against that product's own
 // on-hand/target first (e.g. surplus nitro kegs already on hand reduce how
@@ -297,27 +354,43 @@ export async function computeProductionPlan(): Promise<ProductionPlan> {
     getProductionStockEntities(),
     getLatestProductionStock(),
   ]);
-  const demand = getDemandForWindow(standing, oneOff, popupWeekStart, windowStart, windowEnd);
-  const upcomingDemandRaw = getUpcomingStandingDemand(standing, popupWeekStart);
+  const recipeNames = new Set(recipes.map((r) => r.recipe));
+  const demand = getDemandForWindow(standing, oneOff, popupWeekStart, windowStart, windowEnd, recipeNames);
+  const upcomingDemandRaw = getUpcomingStandingDemand(standing, popupWeekStart, recipeNames);
 
-  const recipeByRecipeProduct = new Map(recipes.map((r) => [r.recipeProduct, r]));
+  const recipeByName = new Map(recipes.map((r) => [r.recipe, r]));
   const productByName = new Map(products.map((p) => [p.product, p]));
   const productsByRecipe = new Map<string, Product[]>();
   for (const p of products) {
-    const list = productsByRecipe.get(p.source) ?? [];
+    const list = productsByRecipe.get(p.recipeSource) ?? [];
     list.push(p);
-    productsByRecipe.set(p.source, list);
+    productsByRecipe.set(p.recipeSource, list);
   }
   const amtUnitByEntity = new Map(stockEntities.map((e) => [e.entity, e.amtUnit]));
 
-  // A reserve entity's own oz size — recipe entities are already oz-native,
-  // product entities convert through that product's own physical size.
+  // A reserve entity's own oz size — a product entity converts through that
+  // product's own physical size (its amtUnit, e.g. "kegs"/"bottles", is
+  // necessarily specific to that one product, so unitOz is the only
+  // authoritative source); a recipe entity has no such per-product size, so
+  // it converts through the universal RECIPE_UNIT_OZ table keyed by its own
+  // amtUnit instead (e.g. "lbs", "gallons").
   function reserveUnitOz(entity: ProductionStockEntity): number {
-    return entity.entityType === "recipe" ? 1 : productByName.get(entity.entity)?.unitOz ?? 0;
+    if (entity.entityType === "product") return productByName.get(entity.entity)?.unitOz ?? 0;
+    const unit = normalizeUnit(entity.amtUnit.trim());
+    const factor = RECIPE_UNIT_OZ[unit];
+    // Falling back to 1 (assume already oz) for an unrecognized unit is the
+    // same silent-undercount failure mode this whole conversion exists to
+    // fix — a typo'd or new unit (e.g. "quart") would quietly compute a
+    // too-low oz figure and under-brew with no signal. Warn instead of
+    // failing silently, since this feeds real production math.
+    if (factor === undefined && unit !== "") {
+      console.warn(`Unrecognized reserve stock amtUnit "${entity.amtUnit}" for "${entity.entity}" — assuming oz`);
+    }
+    return factor ?? 1;
   }
 
   // Oz-equivalent for display uses the product's own physical size (unitOz),
-  // not its recipe-input ozSourceNeeded — a nitro keg order is 640oz of
+  // not its recipe-input ozRecipeSourceNeeded — a nitro keg order is 640oz of
   // finished drink, not the 128oz of concentrate that went into it.
   // quantityUnit "oz" lines are already raw oz (e.g. loose popup beans
   // drawn straight against the "guatemala roast" recipe, no bag in between).
@@ -334,13 +407,15 @@ export async function computeProductionPlan(): Promise<ProductionPlan> {
         const sourced = productsByRecipe.get(line.item) ?? [];
         const displayQty = sourced.length === 1 && sourced[0].unitOz > 0 ? line.quantity / sourced[0].unitOz : null;
         const displayUnit = displayQty !== null ? amtUnitByEntity.get(sourced[0].product) ?? null : null;
-        return { ...line, oz: line.quantity, displayQty, displayUnit };
+        const recipeCategory = recipeByName.get(line.item)?.category ?? null;
+        return { ...line, oz: line.quantity, displayQty, displayUnit, recipeCategory };
       }
       return {
         ...line,
         oz: (productByName.get(line.item)?.unitOz ?? 0) * line.quantity,
         displayQty: line.quantity,
         displayUnit: amtUnitByEntity.get(line.item) ?? null,
+        recipeCategory: null,
       };
     });
   }
@@ -376,7 +451,6 @@ export async function computeProductionPlan(): Promise<ProductionPlan> {
     reserveLevels.push({
       entity: entity.entity,
       entityType: entity.entityType,
-      category: entity.entityType === "recipe" ? recipeByRecipeProduct.get(entity.entity)?.category : undefined,
       amt: entity.amt,
       amtUnit: entity.amtUnit,
       onHand,
@@ -408,11 +482,11 @@ export async function computeProductionPlan(): Promise<ProductionPlan> {
     const topUpQty = topUpByEntity.get(entity.entity) ?? 0;
     const totalQty = Math.max(0, entity.amt + demandQty - onHand);
     if (totalQty > 0) {
-      const totalOz = totalQty * (product?.ozSourceNeeded ?? 0);
+      const totalOz = Math.ceil(totalQty) * (product?.ozRecipeSourceNeeded ?? 0);
       productRequirements.push({ product: entity.entity, demandQty, topUpQty, totalQty, totalOz });
     }
     if (product) {
-      rawOzByRecipe.set(product.source, (rawOzByRecipe.get(product.source) ?? 0) + totalQty * product.ozSourceNeeded);
+      rawOzByRecipe.set(product.recipeSource, (rawOzByRecipe.get(product.recipeSource) ?? 0) + totalQty * product.ozRecipeSourceNeeded);
     }
   }
   productRequirements.sort((a, b) => a.product.localeCompare(b.product));
@@ -424,7 +498,7 @@ export async function computeProductionPlan(): Promise<ProductionPlan> {
     if (productEntityNames.has(productName)) continue; // already handled above
     const product = productByName.get(productName);
     if (!product) continue;
-    rawOzByRecipe.set(product.source, (rawOzByRecipe.get(product.source) ?? 0) + demandQty * product.ozSourceNeeded);
+    rawOzByRecipe.set(product.recipeSource, (rawOzByRecipe.get(product.recipeSource) ?? 0) + demandQty * product.ozRecipeSourceNeeded);
   }
 
   // Recipe-level netting: same formula, one level up — a recipe's
@@ -433,21 +507,22 @@ export async function computeProductionPlan(): Promise<ProductionPlan> {
   // on-hand/target. Recipes with no reserve-stock row have nothing to net
   // against, so their raw demand is used as-is (matches pre-netting
   // behavior for anything not reserve-tracked).
-  const neededByRecipeProduct = new Map(rawOzByRecipe);
+  const neededByName = new Map(rawOzByRecipe);
   for (const entity of stockEntities) {
     if (entity.entityType !== "recipe") continue;
     const rawOz = rawOzByRecipe.get(entity.entity) ?? 0;
     const onHand = latestStock.get(entity.entity) ?? 0;
-    neededByRecipeProduct.set(entity.entity, Math.max(0, entity.amt + rawOz - onHand));
+    const unitOz = reserveUnitOz(entity);
+    neededByName.set(entity.entity, Math.max(0, entity.amt * unitOz + rawOz - onHand * unitOz));
   }
 
   const batches: BatchRequirement[] = [];
-  for (const [recipeProduct, totalNeededQty] of neededByRecipeProduct) {
-    const recipe = recipeByRecipeProduct.get(recipeProduct);
+  for (const [recipeName, totalNeededQty] of neededByName) {
+    const recipe = recipeByName.get(recipeName);
     if (!recipe || recipe.recipeOzYieldQty <= 0) continue;
     const batchesNeeded = Math.ceil(totalNeededQty / recipe.recipeOzYieldQty);
     batches.push({
-      recipeProduct,
+      recipe: recipeName,
       category: recipe.category,
       totalNeededQty,
       unit: "oz",
@@ -457,7 +532,7 @@ export async function computeProductionPlan(): Promise<ProductionPlan> {
     });
   }
   batches.sort(
-    (a, b) => a.category.localeCompare(b.category) || a.recipeProduct.localeCompare(b.recipeProduct),
+    (a, b) => a.category.localeCompare(b.category) || a.recipe.localeCompare(b.recipe),
   );
 
   return {

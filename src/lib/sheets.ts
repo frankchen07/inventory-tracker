@@ -20,22 +20,24 @@ export const SCAN_PHOTOS_HEADERS = ["date", "photoUrl"] as const;
 // header row already in place, same as "inventory" and "scan photos".
 // Everything downstream is oz-normalized — no per-row unit column needed.
 export const RECIPES_SHEET = "recipes";
-export const RECIPES_HEADERS = ["recipeProduct", "category", "recipeOzYieldQty"] as const;
+export const RECIPES_HEADERS = ["recipe", "category", "recipeOzYieldQty"] as const;
 
 export const PRODUCTS_SHEET = "products";
 // unitOz: the product's own physical size in oz, for display only (blank
-// defaults to ozSourceNeeded) — differs from ozSourceNeeded when the product
-// is diluted, e.g. a nitro keg holds 640oz of finished drink but only
-// consumes 128oz of concentrate. source: the recipe this product is filled
-// from directly — every product sources a recipe, never another product.
-export const PRODUCTS_HEADERS = ["product", "unitOz", "source", "ozSourceNeeded"] as const;
+// defaults to ozRecipeSourceNeeded) — differs from ozRecipeSourceNeeded when
+// the product is diluted, e.g. a nitro keg holds 640oz of finished drink but
+// only consumes 128oz of concentrate. recipeSource: the recipe this product
+// is filled from directly — every product sources a recipe, never another
+// product.
+export const PRODUCTS_HEADERS = ["product", "unitOz", "recipeSource", "ozRecipeSourceNeeded"] as const;
 
 export const STANDING_ORDERS_SHEET = "standing orders";
 // channel: "popup" (Boast's own Midwife popup) or "client" (wholesale
 // accounts/events) — a display grouping only, doesn't affect batch math.
-// quantityUnit: "count" (quantity is in product's own unit) or "oz"
-// (quantity is raw oz, product names a reserve-tracked product/recipe
-// directly — for demand with no packaged product, e.g. loose popup beans).
+// quantityUnit: the raw sheet cell (e.g. "count", "oz", "lbs", "gallons",
+// "kegs", blank) — resolveQuantity() in production.ts turns this into a
+// real DemandLine's "count"|"oz" once it knows whether `item` names a
+// product or a recipe directly; see StandingOrder in types.ts.
 // anchorDate/intervalWeeks: cadence beyond weekly (e.g. triweekly, or
 // monthly approximated as every 4 weeks) — see StandingOrder in types.ts.
 // This order must match the actual "standing orders" tab's header row
@@ -49,10 +51,11 @@ export const STANDING_ORDERS_HEADERS = ["customer", "item", "quantity", "quantit
 export const ORDERS_SHEET = "a la carte orders";
 // active: mirrors StandingOrder.active (TRUE/FALSE, blank = inactive) so a
 // specific one-off order can be cancelled/voided without deleting the row.
-// Appended at the end, not inserted, per the standing-orders column-position
-// lesson — readRows maps columns by position, so inserting mid-row silently
-// shifts every field after it.
-export const ORDERS_HEADERS = ["date", "customer", "item", "quantity", "quantityUnit", "notes", "channel", "active"] as const;
+// This order must match the actual "a la carte orders" tab's header row
+// exactly (readRows maps columns by position, not by name) — it's
+// channel/active/notes in the real sheet, not the notes/channel/active order
+// originally planned (same lesson as STANDING_ORDERS_HEADERS above).
+export const ORDERS_HEADERS = ["date", "customer", "item", "quantity", "quantityUnit", "channel", "active", "notes"] as const;
 
 // Running reserve-level tracking for finished/semi-finished production goods
 // — shaped exactly like "inventory": fixed catalog columns, then one date

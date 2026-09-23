@@ -28,7 +28,7 @@ export interface NeedsReviewItem {
 // "recipes" sheet: a batch process (brewing, roasting) and what it yields.
 // Everything is oz — no per-recipe unit needed.
 export interface Recipe {
-  recipeProduct: string;
+  recipe: string;
   category: string;
   recipeOzYieldQty: number;
 }
@@ -37,28 +37,31 @@ export interface Recipe {
 // for one recipe (one recipe, many products) — not necessarily something
 // sold directly to an outside customer, e.g. an internal ingredient like
 // vanilla syrup bottles still belongs here since demand/reserve tracking
-// needs a product-level FK target. source is the recipe this product is
-// filled from; ozSourceNeeded is in that recipe's own oz yield.
+// needs a product-level FK target. recipeSource is the recipe this product
+// is filled from; ozRecipeSourceNeeded is in that recipe's own oz yield.
 export interface Product {
   product: string;
-  source: string;
-  ozSourceNeeded: number;
-  // The product's own physical size in oz — same as ozSourceNeeded unless the
-  // product is diluted (e.g. a nitro keg holds 640oz of finished drink but
-  // only consumes 128oz of concentrate).
+  recipeSource: string;
+  ozRecipeSourceNeeded: number;
+  // The product's own physical size in oz — same as ozRecipeSourceNeeded
+  // unless the product is diluted (e.g. a nitro keg holds 640oz of finished
+  // drink but only consumes 128oz of concentrate).
   unitOz: number;
 }
 
 // "standing orders" sheet: recurring demand. channel distinguishes Boast's
 // own Midwife popup from client/event deliveries — display only.
-// quantityUnit "count" (default) means quantity is in the named item's own
-// unit; "oz" means quantity is already raw oz and item names a
-// reserve-tracked product or recipe directly — used for demand that draws
-// straight off a bulk reserve with no packaged product in between (e.g.
-// loose beans used at the popup, pulled straight from the roast bucket).
+// quantityUnit is the RAW sheet cell (e.g. "count", "oz", "lbs", "gallons",
+// "kegs", blank) — resolved into a real DemandLine's quantity/quantityUnit
+// ("count" | "oz") by resolveQuantity() in production.ts, once `item` is
+// known to be a product or a recipe name (only then can "lbs"/"gallons" be
+// told apart from a product's own colloquial count unit like "kegs"). See
+// resolveQuantity() for the exact rule.
 // `item` (not `product`) because it's genuinely either: a `Product.product`
-// name (quantityUnit "count") or a `Recipe.recipeProduct` name (quantityUnit
-// "oz") — the same generalization "entity" already makes for reserve stock.
+// name (a packaged product — quantity is just a count of it) or a
+// `Recipe.recipe` name (drawn directly off a bulk reserve with no
+// packaged product in between, e.g. loose beans at the popup) — the same
+// generalization "entity" already makes for reserve stock.
 // intervalWeeks/anchorDate model cadence beyond weekly: intervalWeeks 1 (or
 // blank) is weekly (the original, only behavior); 3 is triweekly; 4
 // approximates "monthly" (accepted drift vs. true calendar months).
@@ -72,7 +75,7 @@ export interface StandingOrder {
   customer: string;
   item: string;
   quantity: number;
-  quantityUnit: "count" | "oz";
+  quantityUnit: string;
   dayOfWeek: string;
   active: boolean;
   channel: string;
@@ -89,7 +92,7 @@ export interface OneOffOrder {
   customer: string;
   item: string;
   quantity: number;
-  quantityUnit: "count" | "oz";
+  quantityUnit: string;
   notes: string;
   channel: string;
   active: boolean;
@@ -106,7 +109,7 @@ export interface DemandLine {
   forDate: string;
   channel: string;
   // Oz-equivalent of quantity, using the product's own physical size
-  // (unitOz), not its recipe-input ozSourceNeeded.
+  // (unitOz), not its recipe-input ozRecipeSourceNeeded.
   oz: number;
   // A friendly packaged-unit quantity for display, when unambiguous: for a
   // "count" line this is just quantity; for an "oz" line (a recipe drawn
@@ -120,6 +123,12 @@ export interface DemandLine {
   // null whenever displayQty is null, and also null if that product has no
   // reserve-stock row to draw a unit name from (falls back to a bare number).
   displayUnit: string | null;
+  // The source recipe's category (e.g. "beans"), for an "oz" line whose
+  // displayQty fell back to null (no single packaged product to convert
+  // through) — lets display pick a friendly fallback unit anyway (pounds
+  // for "beans") instead of always falling back to raw oz. Null for "count"
+  // lines (never used there, since those always have a non-null displayQty).
+  recipeCategory: string | null;
 }
 
 // How much of one recipe product is needed this week, and how many batches
@@ -128,7 +137,7 @@ export interface DemandLine {
 // with no reserve-stock row) — see computeProductionPlan() in production.ts.
 // unit is always "oz".
 export interface BatchRequirement {
-  recipeProduct: string;
+  recipe: string;
   category: string;
   totalNeededQty: number;
   unit: string;
@@ -157,16 +166,18 @@ export interface ProductionStockEntity {
 export interface ReserveLevel {
   entity: string;
   entityType: "recipe" | "product";
-  // Recipe category (e.g. "beans"), for picking a friendly display unit on
-  // recipe-type rows — undefined/irrelevant for entityType "product".
-  category?: string;
+  // amt/amtUnit are exactly what's written in the "reserve stock" sheet —
+  // whatever colloquial unit Frank tracks that entity in day-to-day (kegs,
+  // bottles, lbs, gallons), not necessarily oz.
   amt: number;
   amtUnit: string;
   onHand: number;
   topUpQty: number;
-  // Oz-equivalent of amt/onHand — identical to amt/onHand when entityType is
-  // "recipe" (already oz-native); converted via the product's unitOz when
-  // entityType is "product".
+  // Oz-equivalent of amt/onHand: converted via the product's own unitOz when
+  // entityType is "product", or via amtUnit against a fixed physical-unit
+  // table (lbs, gallons, ...) when entityType is "recipe" — see
+  // reserveUnitOz() in production.ts. This is the number that actually feeds
+  // production math; amt/amtUnit above are for display only.
   amtOz: number;
   onHandOz: number;
 }
@@ -187,9 +198,14 @@ export interface ProductRequirement {
   // max(0, target + demandQty - onHand) — NOT demandQty + topUpQty, since
   // that would double-count demand already covered by on-hand stock.
   totalQty: number;
-  // totalQty converted to oz of source recipe consumed (totalQty *
-  // product.ozSourceNeeded) — the same oz figure this requirement folds
-  // into its source recipe's raw need, shown for display context.
+  // Oz of source recipe consumed to produce the whole-unit count shown as
+  // "Make N" (i.e. Math.ceil(totalQty) * product.ozRecipeSourceNeeded) — a
+  // display-only figure, deliberately NOT the same number that actually
+  // folds into the source recipe's raw oz need (which uses the unrounded
+  // totalQty — see rawOzByRecipe in computeProductionPlan()). Rounding
+  // totalQty up here keeps "Make 2" and its oz figure mutually consistent
+  // (2 whole bottles really do take this much oz), instead of pairing a
+  // rounded-up count with the smaller, unrounded raw-demand oz figure.
   totalOz: number;
 }
 
