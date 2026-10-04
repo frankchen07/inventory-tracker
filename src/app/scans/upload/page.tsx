@@ -1,6 +1,8 @@
 import { todayISO } from "@/lib/dates";
 import { UploadForm } from "./upload-form";
 
+export const dynamic = "force-dynamic";
+
 export default function UploadScanPage() {
   return (
     <main className="mx-auto max-w-md px-4 py-8">
