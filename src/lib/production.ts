@@ -203,6 +203,7 @@ export async function getProductionStockEntities(): Promise<ProductionStockEntit
     entityType: r.entityType.trim().toLowerCase() === "product" ? "product" : "recipe",
     amt: Number(r.amt) || 0,
     amtUnit: r.amtUnit,
+    rowIndex: r._rowIndex,
   }));
 }
 
@@ -299,7 +300,7 @@ export async function computeProductionPlan(): Promise<ProductionPlan> {
   ]);
   // A physical count is ground truth as of the date it was taken, carried
   // forward until the next one; never counted reads as 0.
-  const latestStock = new Map(stockEntities.map((e, i) => [e.entity, Number(latest.values[i]) || 0]));
+  const latestStock = new Map(stockEntities.map((e) => [e.entity, Number(latest.valueAtRow(e.rowIndex)) || 0]));
   return buildProductionPlan({ standing, oneOff, recipes, products, stockEntities, latestStock }, todayISO());
 }
 

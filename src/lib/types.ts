@@ -6,6 +6,8 @@ export interface CatalogItem {
   supplier: string;
   unitConversion: string;
   threshold: string;
+  // Real sheet row — what lines the item up with its date-column counts.
+  rowIndex: number;
 }
 
 // A catalog item currently below its threshold.
@@ -151,6 +153,8 @@ export interface ProductionStockEntity {
   entityType: "recipe" | "product";
   amt: number;
   amtUnit: string;
+  // Real sheet row — what lines the entity up with its date-column counts.
+  rowIndex: number;
 }
 
 // Current on-hand vs. target for one reserve-tracked entity — every entity

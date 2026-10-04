@@ -21,6 +21,7 @@ export async function getCatalog(): Promise<CatalogItem[]> {
     supplier: r.supplier,
     unitConversion: r.unitConversion,
     threshold: r.threshold,
+    rowIndex: r._rowIndex,
   }));
 }
 
@@ -36,7 +37,7 @@ export async function getInventorySnapshot(): Promise<InventorySnapshot> {
     getCatalog(),
     readLatestValues(CATALOG_SHEET, CATALOG_HEADERS.length),
   ]);
-  const counts = new Map(catalog.map((c, i) => [c.item, latest.values[i] ?? ""]));
+  const counts = new Map(catalog.map((c) => [c.item, latest.valueAtRow(c.rowIndex)]));
   return { catalog, counts, latestDate: latest.latestDate };
 }
 
@@ -84,8 +85,8 @@ export async function writeCountColumn(
   catalog: CatalogItem[],
 ): Promise<void> {
   const colIndex = await getOrCreateDateColumn(date);
-  const values = catalog.map((c) => valuesByItem.get(c.item) ?? "");
-  await writeColumnValues(colIndex, values);
+  const cells = catalog.map((c) => ({ rowIndex: c.rowIndex, value: valuesByItem.get(c.item) ?? "" }));
+  await writeColumnValues(colIndex, cells);
 }
 
 export async function recordScanPhoto(date: string, photoUrl: string): Promise<void> {

@@ -69,9 +69,26 @@ export function columnLetter(index: number): string {
   return letter;
 }
 
-export type SheetRow<H extends readonly string[]> = Record<H[number], string>;
+export type SheetRow<H extends readonly string[]> = Record<H[number], string> & {
+  _rowIndex: number;
+};
 
-// Row 1 is always the header row; data starts at row 2.
+// Row 1 is always the header row; data starts at row 2. Blank rows are
+// dropped, so _rowIndex (the real sheet row) — not the position in the
+// returned array — is what lines a row up with its date-column cells.
+export function parseRows<H extends readonly string[]>(values: unknown[][], headers: H): SheetRow<H>[] {
+  return values
+    .map((row, i) => {
+      const obj = { _rowIndex: i + 2 } as SheetRow<H>;
+      headers.forEach((h, idx) => {
+        const cell = row[idx];
+        (obj as Record<string, string>)[h] = cell === undefined || cell === null ? "" : String(cell);
+      });
+      return obj;
+    })
+    .filter((row) => headers.some((h) => row[h as H[number]] !== ""));
+}
+
 export async function readRows<H extends readonly string[]>(
   sheetName: string,
   headers: H,
@@ -81,17 +98,7 @@ export async function readRows<H extends readonly string[]>(
     spreadsheetId: SPREADSHEET_ID,
     range: `${sheetName}!A2:${lastCol}`,
   });
-  const values = res.data.values ?? [];
-  return values
-    .map((row) => {
-      const obj = {} as SheetRow<H>;
-      headers.forEach((h, idx) => {
-        const cell = row[idx];
-        (obj as Record<string, string>)[h] = cell === undefined || cell === null ? "" : String(cell);
-      });
-      return obj;
-    })
-    .filter((row) => headers.some((h) => row[h as H[number]] !== ""));
+  return parseRows(res.data.values ?? [], headers);
 }
 
 export async function appendRow<H extends readonly string[]>(
@@ -161,21 +168,19 @@ export async function listDateColumns(
     .filter((c) => c.date !== "");
 }
 
-// Reads every date column of a date-columned sheet in one request and merges
-// them oldest-to-newest, so a blank cell resolves to the nearest earlier
-// non-blank value for that row. This is the one place "untouched item = no
-// change" gets applied — neither entry path writes carried-forward values
-// into the sheet, so a blank cell always means "not recounted this time."
-// values[i] is data row i (sheet row i+2), "" if never counted.
-export async function readLatestValues(
-  sheetName: string,
-  fixedColumnCount: number,
-): Promise<{ values: string[]; latestDate: string | null }> {
-  const res = await getClient().spreadsheets.values.get({
-    spreadsheetId: SPREADSHEET_ID,
-    range: `${sheetName}!${columnLetter(fixedColumnCount)}1:ZZ`,
-  });
-  const [headerRow = [], ...rows] = res.data.values ?? [];
+export interface LatestValues {
+  // Latest non-blank value in that sheet row, "" if never counted.
+  valueAtRow: (rowIndex: number) => string;
+  latestDate: string | null;
+}
+
+// Merges date columns (header row first, as read from the first date column
+// rightward) oldest-to-newest, so a blank cell resolves to the nearest
+// earlier non-blank value for that row. This is the one place "untouched
+// item = no change" gets applied — neither entry path writes carried-forward
+// values into the sheet, so a blank cell always means "not recounted this time."
+export function mergeDateColumns(grid: unknown[][]): LatestValues {
+  const [headerRow = [], ...rows] = grid;
   const cols = headerRow
     .map((date, i) => ({ date: String(date ?? ""), i }))
     .filter((c) => c.date !== "")
@@ -188,7 +193,15 @@ export async function readLatestValues(
       if (v !== "") values[r] = v;
     });
   }
-  return { values, latestDate: cols.at(-1)?.date ?? null };
+  return { valueAtRow: (rowIndex) => values[rowIndex - 2] ?? "", latestDate: cols.at(-1)?.date ?? null };
+}
+
+export async function readLatestValues(sheetName: string, fixedColumnCount: number): Promise<LatestValues> {
+  const res = await getClient().spreadsheets.values.get({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `${sheetName}!${columnLetter(fixedColumnCount)}1:ZZ`,
+  });
+  return mergeDateColumns(res.data.values ?? []);
 }
 
 // Finds the column for a given date, creating it (as a new header cell one
@@ -212,13 +225,28 @@ export async function getOrCreateDateColumn(
   return nextIndex;
 }
 
-// values[i] lands in row i+2 (row 1 is the header). Pass one value per
-// catalog row, in catalog order — callers are responsible for carry-forward.
+export interface RowCell {
+  rowIndex: number;
+  value: string;
+}
+
+// One value per sheet row from row 2 down to the last given row, so a blank
+// spacer row between items is written blank instead of shifting the rows
+// below it up. cells must be in ascending rowIndex order (as readRows returns them).
+export function columnByRow(cells: RowCell[]): string[] {
+  const values = Array<string>(Math.max(0, (cells.at(-1)?.rowIndex ?? 1) - 1)).fill("");
+  for (const { rowIndex, value } of cells) values[rowIndex - 2] = value;
+  return values;
+}
+
+// Callers are responsible for carry-forward — pass "" for anything not
+// recounted.
 export async function writeColumnValues(
   colIndex: number,
-  values: string[],
+  cells: RowCell[],
   sheetName: string = CATALOG_SHEET,
 ): Promise<void> {
+  const values = columnByRow(cells);
   const col = columnLetter(colIndex);
   await getClient().spreadsheets.values.update({
     spreadsheetId: SPREADSHEET_ID,

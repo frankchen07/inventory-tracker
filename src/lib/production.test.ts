@@ -37,9 +37,9 @@ const inputs = {
     { product: "vanilla syrup bottle", recipeSource: "vanilla syrup", ozRecipeSourceNeeded: 25, unitOz: 25 },
   ],
   stockEntities: [
-    { entity: "nitro keg", entityType: "product" as const, amt: 4, amtUnit: "kegs" },
-    { entity: "cold brew", entityType: "recipe" as const, amt: 2, amtUnit: "gallons" },
-    { entity: "vanilla syrup bottle", entityType: "product" as const, amt: 2, amtUnit: "bottles" },
+    { entity: "nitro keg", entityType: "product" as const, amt: 4, amtUnit: "kegs", rowIndex: 2 },
+    { entity: "cold brew", entityType: "recipe" as const, amt: 2, amtUnit: "gallons", rowIndex: 3 },
+    { entity: "vanilla syrup bottle", entityType: "product" as const, amt: 2, amtUnit: "bottles", rowIndex: 4 },
   ],
   latestStock: new Map([
     ["nitro keg", 3],
