@@ -1,26 +1,15 @@
 import Link from "next/link";
-import { computeRestockList, getCatalog } from "@/lib/inventory";
-import { getLatestDateColumn } from "@/lib/sheets";
-import type { RestockItem } from "@/lib/types";
+import { computeRestockList, getInventorySnapshot } from "@/lib/inventory";
 
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
-  const [catalog, { lowStock, needsReview }, latestDate] = await Promise.all([
-    getCatalog(),
-    computeRestockList(),
-    getLatestDateColumn(),
-  ]);
+  const { catalog, counts, latestDate } = await getInventorySnapshot();
+  const { lowStock, needsReview } = computeRestockList(catalog, counts);
 
   const sheetUrl = `https://docs.google.com/spreadsheets/d/${process.env.GOOGLE_SHEETS_SPREADSHEET_ID}/edit`;
 
-  const byLocation = new Map<string, RestockItem[]>();
-  for (const item of lowStock) {
-    const key = item.supplier || "Unspecified";
-    const group = byLocation.get(key) ?? [];
-    group.push(item);
-    byLocation.set(key, group);
-  }
+  const byLocation = Map.groupBy(lowStock, (item) => item.supplier || "Unspecified");
   const locations = [...byLocation.keys()].sort((a, b) => a.localeCompare(b));
 
   return (
@@ -30,7 +19,7 @@ export default async function DashboardPage() {
           <h1 className="text-xl font-semibold text-zinc-900">Inventory Dashboard</h1>
           <p className="mt-1 text-sm text-zinc-500">
             {latestDate
-              ? `Based on latest data on ${latestDate.date}, `
+              ? `Based on latest data on ${latestDate}, `
               : "No counts recorded yet — "}
             {catalog.length} items tracked · {lowStock.length} low stock · {needsReview.length} need review
           </p>

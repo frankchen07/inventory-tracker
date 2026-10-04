@@ -1,8 +1,5 @@
+import { todayISO } from "@/lib/dates";
 import { UploadForm } from "./upload-form";
-
-function todayISO(): string {
-  return new Date().toISOString().slice(0, 10);
-}
 
 export default function UploadScanPage() {
   return (

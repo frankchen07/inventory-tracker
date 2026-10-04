@@ -30,7 +30,7 @@ export async function POST(request: Request) {
 
   const catalog = await getCatalog();
 
-  const { lineItems } = await extractInventoryFromPhoto(
+  const lineItems = await extractInventoryFromPhoto(
     bytes.toString("base64"),
     photo.type as "image/jpeg" | "image/png" | "image/webp",
     catalog,

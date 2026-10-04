@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-
-const COOKIE_NAME = "inventory_auth";
+import { COOKIE_NAME } from "@/lib/auth";
 
 export function proxy(request: NextRequest) {
   const cookie = request.cookies.get(COOKIE_NAME)?.value;

@@ -1,5 +1,6 @@
 import { createMcpHandler } from "mcp-handler";
 import { z } from "zod";
+import { todayISO } from "@/lib/dates";
 import { getCatalog, writeCountColumn } from "@/lib/inventory";
 
 const mcpHandler = createMcpHandler(
@@ -44,9 +45,9 @@ const mcpHandler = createMcpHandler(
           written.push(canonical);
         }
 
-        const targetDate = date ?? new Date().toISOString().slice(0, 10);
+        const targetDate = date ?? todayISO();
         if (valuesByItem.size > 0) {
-          await writeCountColumn(targetDate, valuesByItem);
+          await writeCountColumn(targetDate, valuesByItem, catalog);
         }
 
         return {

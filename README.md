@@ -5,7 +5,7 @@ by a Google Sheet (no database) via a service account.
 
 ## Setup
 
-Copy `.env.local` (not committed) with:
+Copy `.env.example` to `.env.local` (not committed) and fill in:
 
 - `GOOGLE_SHEETS_SPREADSHEET_ID` — the sheet this app reads/writes.
 - `GOOGLE_SERVICE_ACCOUNT_EMAIL` / `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY` — a Google service
@@ -19,11 +19,12 @@ Then:
 
 ```bash
 npm run dev
+npm test   # unit tests for unit parsing and production math
 ```
 
 ## The sheet
 
-Six tabs, each a flat table with a header row (no numeric IDs — everything is keyed by name):
+Seven tabs, each a flat table with a header row (no numeric IDs — everything is keyed by name):
 
 - **inventory** — the purchased-goods catalog (item, category, supplier, unit conversion,
   threshold), plus one date column per physical count, oldest to newest.
@@ -42,8 +43,9 @@ Six tabs, each a flat table with a header row (no numeric IDs — everything is 
 - **`/scans/upload`** — photograph a filled-in inventory count sheet; OCR drafts the numbers,
   you review and confirm before anything is written back to `inventory`.
 - **`/production`** — this week's plan: what's needed for the Wed–Sat popup/deliveries, current
-  reserve levels, and what to brew/roast/make Mon/Tue to cover it. Always computed off *this*
-  calendar week — reopening it later in the week doesn't change what window it's planning for.
+  reserve levels, and what to brew/roast/make Mon/Tue to cover it. Standing orders always map onto
+  *this* calendar week's Wed–Sat; one-off orders are picked up from today through 8 days out, so an
+  order early next week shows up in time to brew for it.
 
 Editing `recipes`/`products`/`standing orders`/`reserve stock` directly in the sheet is expected
 day-to-day — the app never needs a code change for a new product or a renamed recipe, only

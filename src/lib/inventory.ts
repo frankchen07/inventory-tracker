@@ -7,8 +7,7 @@ import {
   appendRow,
   ensureSheetWithHeaders,
   getOrCreateDateColumn,
-  listDateColumns,
-  readColumnValues,
+  readLatestValues,
   writeColumnValues,
 } from "@/lib/sheets";
 import { parseConversion, parseReportedQuantity, parseThreshold } from "@/lib/unit-conversion";
@@ -25,26 +24,20 @@ export async function getCatalog(): Promise<CatalogItem[]> {
   }));
 }
 
-// Merges every date column left-to-right so a blank cell always resolves to
-// the nearest earlier non-blank value for that item. This is the one place
-// "untouched item = no change" gets applied — neither entry path writes
-// carried-forward values into the sheet itself, so a blank cell always means
-// "not recounted this time," not "assumed unchanged." Returns raw display
-// text per item (e.g. "1.75 boxes", "8 sleeves").
-export async function getLatestCounts(): Promise<Map<string, string>> {
-  const catalog = await getCatalog();
-  const cols = await listDateColumns();
-  const sorted = [...cols].sort((a, b) => a.date.localeCompare(b.date));
+export interface InventorySnapshot {
+  catalog: CatalogItem[];
+  // Latest raw display text per item (e.g. "1.75 boxes"), "" if never counted.
+  counts: Map<string, string>;
+  latestDate: string | null;
+}
 
-  const result = new Map<string, string>(catalog.map((c) => [c.item, ""]));
-  for (const col of sorted) {
-    const values = await readColumnValues(col.colIndex, catalog.length);
-    catalog.forEach((c, i) => {
-      const v = values[i];
-      if (v !== "") result.set(c.item, v);
-    });
-  }
-  return result;
+export async function getInventorySnapshot(): Promise<InventorySnapshot> {
+  const [catalog, latest] = await Promise.all([
+    getCatalog(),
+    readLatestValues(CATALOG_SHEET, CATALOG_HEADERS.length),
+  ]);
+  const counts = new Map(catalog.map((c, i) => [c.item, latest.values[i] ?? ""]));
+  return { catalog, counts, latestDate: latest.latestDate };
 }
 
 export interface RestockResult {
@@ -54,13 +47,10 @@ export interface RestockResult {
 
 // Items below threshold, plus a separate bucket for items that have a
 // recorded count but couldn't be converted to a number (e.g. a bare "6"
-// with no unit). Those used to be silently skipped, which is worse than a
-// false alarm — they'd just vanish from the list with no signal anything
-// was wrong. Items with no count at all yet (never counted) stay out of
-// both lists — that's a different, expected state.
-export async function computeRestockList(): Promise<RestockResult> {
-  const catalog = await getCatalog();
-  const counts = await getLatestCounts();
+// with no unit) — silently skipping those would be worse than a false
+// alarm. Items with no count at all yet (never counted) stay out of both
+// lists — that's a different, expected state.
+export function computeRestockList(catalog: CatalogItem[], counts: Map<string, string>): RestockResult {
   const lowStock: RestockItem[] = [];
   const needsReview: NeedsReviewItem[] = [];
 
@@ -78,13 +68,7 @@ export async function computeRestockList(): Promise<RestockResult> {
     }
 
     if (remainingAtomic < thresholdAtomic) {
-      lowStock.push({
-        item: item.item,
-        supplier: item.supplier,
-        remaining: countText,
-        remainingAtomic,
-        thresholdAtomic,
-      });
+      lowStock.push({ item: item.item, supplier: item.supplier, remaining: countText });
     }
   }
 
@@ -93,9 +77,12 @@ export async function computeRestockList(): Promise<RestockResult> {
 
 // Writes a new (or updates an existing) date column. `valuesByItem` should
 // only contain items actually recounted this time — everything else is left
-// blank so getLatestCounts() carries the prior value forward at read time.
-export async function writeCountColumn(date: string, valuesByItem: Map<string, string>): Promise<void> {
-  const catalog = await getCatalog();
+// blank so readLatestValues() carries the prior value forward at read time.
+export async function writeCountColumn(
+  date: string,
+  valuesByItem: Map<string, string>,
+  catalog: CatalogItem[],
+): Promise<void> {
   const colIndex = await getOrCreateDateColumn(date);
   const values = catalog.map((c) => valuesByItem.get(c.item) ?? "");
   await writeColumnValues(colIndex, values);

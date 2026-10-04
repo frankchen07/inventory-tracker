@@ -1,20 +1,7 @@
-import type { CatalogItem } from "@/lib/types";
+import type { CatalogItem, ScanDraftLineItem } from "@/lib/types";
 
 const OPENROUTER_MODEL = "anthropic/claude-opus-4.8";
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
-
-export interface OcrLineItem {
-  item: string;
-  reportedQuantityText: string;
-  confidence: number;
-  ambiguous: boolean;
-  notes: string | null;
-}
-
-export interface OcrResult {
-  lineItems: OcrLineItem[];
-  rawResponse: unknown;
-}
 
 const SYSTEM_PROMPT = `You transcribe a handwritten inventory count sheet into structured data. The sheet has one row per supply item, each with a quantity written in the owner's own shorthand — not a plain number.
 
@@ -63,7 +50,7 @@ export async function extractInventoryFromPhoto(
   imageBase64: string,
   mediaType: "image/jpeg" | "image/png" | "image/webp",
   items: CatalogItem[],
-): Promise<OcrResult> {
+): Promise<ScanDraftLineItem[]> {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) {
     throw new Error("OPENROUTER_API_KEY is not set");
@@ -119,9 +106,9 @@ export async function extractInventoryFromPhoto(
     throw new Error("No structured output returned from OCR extraction.");
   }
 
-  let parsed: { lineItems: OcrLineItem[] };
+  let parsed: { lineItems: ScanDraftLineItem[] };
   try {
-    parsed = JSON.parse(content) as { lineItems: OcrLineItem[] };
+    parsed = JSON.parse(content) as { lineItems: ScanDraftLineItem[] };
   } catch (err) {
     throw new Error(
       `OCR returned unparseable JSON despite the strict schema: ${err instanceof Error ? err.message : String(err)}`,
@@ -137,5 +124,5 @@ export async function extractInventoryFromPhoto(
     );
   }
 
-  return { lineItems, rawResponse: data };
+  return lineItems;
 }

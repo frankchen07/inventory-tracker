@@ -10,8 +10,7 @@ import {
   RESERVE_STOCK_SHEET,
   RESERVE_STOCK_HEADERS,
   readRows,
-  listDateColumns,
-  readColumnValues,
+  readLatestValues,
 } from "@/lib/sheets";
 import type {
   Recipe,
@@ -26,6 +25,7 @@ import type {
   ProductionPlan,
 } from "@/lib/types";
 import { normalizeUnit } from "@/lib/unit-conversion";
+import { addDays, mondayOfWeek, parseDate, todayISO } from "@/lib/dates";
 
 // Universal physical-unit conversions for reserve-stock entities of type
 // "recipe" (bulk goods with no single packaged product to size-convert
@@ -37,7 +37,7 @@ import { normalizeUnit } from "@/lib/unit-conversion";
 // number trustworthy for real production math instead of just a display
 // label. An amtUnit not found here (including "oz" itself) is assumed to
 // already be oz — same fail-open convention used elsewhere in this file.
-const RECIPE_UNIT_OZ: Record<string, number> = {
+export const RECIPE_UNIT_OZ: Record<string, number> = {
   oz: 1,
   ounce: 1,
   lb: 16,
@@ -85,31 +85,16 @@ function resolveQuantity(
 // those days it's actually opened on.
 const WINDOW_DAYS = ["Wednesday", "Thursday", "Friday", "Saturday"];
 
-function isoDate(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+function parseChannel(raw: string): string {
+  return raw.trim().toLowerCase() === "popup" ? "popup" : "client";
 }
 
-// Parses a "YYYY-MM-DD" date string as local calendar date, not UTC, so it
-// matches the wall calendar regardless of server timezone.
-function parseDate(date: string): Date {
-  const [y, m, d] = date.split("-").map(Number);
-  return new Date(y, m - 1, d);
+function parseActive(raw: string): boolean {
+  return raw.trim().toUpperCase() === "TRUE";
 }
 
-export function addDays(date: string, days: number): string {
-  const d = parseDate(date);
-  d.setDate(d.getDate() + days);
-  return isoDate(d);
-}
-
-export function todayISO(): string {
-  return isoDate(new Date());
-}
-
-// Monday of the calendar week containing `date` (JS getDay(): Sun=0..Sat=6).
-export function mondayOfWeek(date: string): string {
-  const daysSinceMonday = (parseDate(date).getDay() + 6) % 7;
-  return addDays(date, -daysSinceMonday);
+function byDateThenCustomer(a: DemandLine, b: DemandLine): number {
+  return a.forDate.localeCompare(b.forDate) || a.customer.localeCompare(b.customer);
 }
 
 export async function getRecipes(): Promise<Recipe[]> {
@@ -142,8 +127,8 @@ export async function getStandingOrders(): Promise<StandingOrder[]> {
     quantity: Number(r.quantity) || 0,
     quantityUnit: r.quantityUnit.trim(),
     dayOfWeek: r.dayOfWeek,
-    active: r.active.trim().toUpperCase() === "TRUE",
-    channel: r.channel.trim().toLowerCase() === "popup" ? "popup" : "client",
+    active: parseActive(r.active),
+    channel: parseChannel(r.channel),
     intervalWeeks: Number(r.intervalWeeks) || 1,
     anchorDate: r.anchorDate.trim(),
   }));
@@ -166,6 +151,27 @@ function isDueThisWeek(order: StandingOrder, popupWeekStart: string): boolean {
   return ((weeksSince % order.intervalWeeks) + order.intervalWeeks) % order.intervalWeeks === 0;
 }
 
+function toDemandLine(
+  order: StandingOrder | OneOffOrder,
+  forDate: string,
+  recipeNames: Set<string>,
+): DemandLine {
+  const { quantity, quantityUnit } = resolveQuantity(order.item, order.quantity, order.quantityUnit, recipeNames);
+  return {
+    customer: order.customer,
+    item: order.item,
+    quantity,
+    quantityUnit,
+    forDate,
+    channel: order.channel,
+    // filled in by fillOz() once product sizes are known
+    oz: 0,
+    displayQty: null,
+    displayUnit: null,
+    recipeCategory: null,
+  };
+}
+
 // Builds one standing order's demand line against a specific week's
 // Wednesday (weekStart) — used both for this week's real demand and for
 // next week's look-ahead notice, so the two never drift apart in shape.
@@ -173,19 +179,7 @@ function isDueThisWeek(order: StandingOrder, popupWeekStart: string): boolean {
 function standingOrderDemandLine(order: StandingOrder, weekStart: string, recipeNames: Set<string>): DemandLine | null {
   const dayIndex = WINDOW_DAYS.findIndex((d) => d.toLowerCase() === order.dayOfWeek.trim().toLowerCase());
   if (dayIndex === -1) return null;
-  const { quantity, quantityUnit } = resolveQuantity(order.item, order.quantity, order.quantityUnit, recipeNames);
-  return {
-    customer: order.customer,
-    item: order.item,
-    quantity,
-    quantityUnit,
-    forDate: addDays(weekStart, dayIndex),
-    channel: order.channel,
-    oz: 0, // filled in by fillOz() once product sizes are known
-    displayQty: null, // filled in by fillOz()
-    displayUnit: null, // filled in by fillOz()
-    recipeCategory: null, // filled in by fillOz()
-  };
+  return toDemandLine(order, addDays(weekStart, dayIndex), recipeNames);
 }
 
 export async function getOneOffOrders(): Promise<OneOffOrder[]> {
@@ -197,8 +191,8 @@ export async function getOneOffOrders(): Promise<OneOffOrder[]> {
     quantity: Number(r.quantity) || 0,
     quantityUnit: r.quantityUnit.trim(),
     notes: r.notes,
-    channel: r.channel.trim().toLowerCase() === "popup" ? "popup" : "client",
-    active: r.active.trim().toUpperCase() === "TRUE",
+    channel: parseChannel(r.channel),
+    active: parseActive(r.active),
   }));
 }
 
@@ -210,26 +204,6 @@ export async function getProductionStockEntities(): Promise<ProductionStockEntit
     amt: Number(r.amt) || 0,
     amtUnit: r.amtUnit,
   }));
-}
-
-// Mirrors getLatestCounts() in inventory.ts: merges every date column
-// left-to-right so a blank cell always resolves to the nearest earlier
-// non-blank value for that entity — a physical count is ground truth as of
-// the date it was taken, carried forward until the next one.
-export async function getLatestProductionStock(): Promise<Map<string, number>> {
-  const entities = await getProductionStockEntities();
-  const cols = await listDateColumns(RESERVE_STOCK_SHEET, RESERVE_STOCK_HEADERS.length);
-  const sorted = [...cols].sort((a, b) => a.date.localeCompare(b.date));
-
-  const result = new Map<string, number>(entities.map((e) => [e.entity, 0]));
-  for (const col of sorted) {
-    const values = await readColumnValues(col.colIndex, entities.length, RESERVE_STOCK_SHEET);
-    entities.forEach((e, i) => {
-      const v = values[i];
-      if (v !== "") result.set(e.entity, Number(v) || 0);
-    });
-  }
-  return result;
 }
 
 // Standing orders that are active, in-phase for this week (isDueThisWeek —
@@ -261,22 +235,10 @@ export function getDemandForWindow(
   for (const order of oneOff) {
     if (!order.active) continue;
     if (order.date >= windowStart && order.date <= windowEnd) {
-      const { quantity, quantityUnit } = resolveQuantity(order.item, order.quantity, order.quantityUnit, recipeNames);
-      demand.push({
-        customer: order.customer,
-        item: order.item,
-        quantity,
-        quantityUnit,
-        forDate: order.date,
-        channel: order.channel,
-        oz: 0,
-        displayQty: null,
-        displayUnit: null,
-        recipeCategory: null,
-      });
+      demand.push(toDemandLine(order, order.date, recipeNames));
     }
   }
-  demand.sort((a, b) => a.forDate.localeCompare(b.forDate) || a.customer.localeCompare(b.customer));
+  demand.sort(byDateThenCustomer);
   return demand;
 }
 
@@ -303,7 +265,7 @@ export function getUpcomingStandingDemand(
     const line = standingOrderDemandLine(order, nextWeekStart, recipeNames);
     if (line) upcoming.push(line);
   }
-  upcoming.sort((a, b) => a.forDate.localeCompare(b.forDate) || a.customer.localeCompare(b.customer));
+  upcoming.sort(byDateThenCustomer);
   return upcoming;
 }
 
@@ -327,32 +289,45 @@ export function getUpcomingStandingDemand(
 // anchor, so they never double up even though the capture window is wider
 // than one Wed-Sat block.
 export async function computeProductionPlan(): Promise<ProductionPlan> {
-  const today = todayISO();
-  const monday = mondayOfWeek(today);
-  const popupWeekStart = addDays(monday, 2);
-  const windowStart = today;
-  const windowEnd = addDays(today, 8);
-
-  const [standing, oneOff, recipes, products, stockEntities, latestStock] = await Promise.all([
+  const [standing, oneOff, recipes, products, stockEntities, latest] = await Promise.all([
     getStandingOrders(),
     getOneOffOrders(),
     getRecipes(),
     getProducts(),
     getProductionStockEntities(),
-    getLatestProductionStock(),
+    readLatestValues(RESERVE_STOCK_SHEET, RESERVE_STOCK_HEADERS.length),
   ]);
+  // A physical count is ground truth as of the date it was taken, carried
+  // forward until the next one; never counted reads as 0.
+  const latestStock = new Map(stockEntities.map((e, i) => [e.entity, Number(latest.values[i]) || 0]));
+  return buildProductionPlan({ standing, oneOff, recipes, products, stockEntities, latestStock }, todayISO());
+}
+
+export interface ProductionInputs {
+  standing: StandingOrder[];
+  oneOff: OneOffOrder[];
+  recipes: Recipe[];
+  products: Product[];
+  stockEntities: ProductionStockEntity[];
+  latestStock: Map<string, number>;
+}
+
+export function buildProductionPlan(
+  { standing, oneOff, recipes, products, stockEntities, latestStock }: ProductionInputs,
+  today: string,
+): ProductionPlan {
+  const monday = mondayOfWeek(today);
+  const popupWeekStart = addDays(monday, 2);
+  const windowStart = today;
+  const windowEnd = addDays(today, 8);
+
   const recipeNames = new Set(recipes.map((r) => r.recipe));
   const demand = getDemandForWindow(standing, oneOff, popupWeekStart, windowStart, windowEnd, recipeNames);
   const upcomingDemandRaw = getUpcomingStandingDemand(standing, popupWeekStart, recipeNames);
 
   const recipeByName = new Map(recipes.map((r) => [r.recipe, r]));
   const productByName = new Map(products.map((p) => [p.product, p]));
-  const productsByRecipe = new Map<string, Product[]>();
-  for (const p of products) {
-    const list = productsByRecipe.get(p.recipeSource) ?? [];
-    list.push(p);
-    productsByRecipe.set(p.recipeSource, list);
-  }
+  const productsByRecipe = Map.groupBy(products, (p) => p.recipeSource);
   const amtUnitByEntity = new Map(stockEntities.map((e) => [e.entity, e.amtUnit]));
 
   // A reserve entity's own oz size — a product entity converts through that
@@ -415,9 +390,10 @@ export async function computeProductionPlan(): Promise<ProductionPlan> {
   // straight against a recipe, no packaged product in between).
   const demandByProduct = new Map<string, number>();
   const rawOzByRecipe = new Map<string, number>();
+  const addRawOz = (recipe: string, oz: number) => rawOzByRecipe.set(recipe, (rawOzByRecipe.get(recipe) ?? 0) + oz);
   for (const line of demandWithOz) {
     if (line.quantityUnit === "oz") {
-      rawOzByRecipe.set(line.item, (rawOzByRecipe.get(line.item) ?? 0) + line.quantity);
+      addRawOz(line.item, line.quantity);
       continue;
     }
     demandByProduct.set(line.item, (demandByProduct.get(line.item) ?? 0) + line.quantity);
@@ -428,32 +404,26 @@ export async function computeProductionPlan(): Promise<ProductionPlan> {
   // target snapshot answering "is my safety stock intact," which is a
   // deliberately different question from "how much do I need to make this
   // week" (computed below via the netted totals).
-  const reserveLevels: ReserveLevel[] = [];
-  const topUpByEntity = new Map<string, number>();
-  for (const entity of stockEntities) {
+  const reserveLevels: ReserveLevel[] = stockEntities.map((entity) => {
     const onHand = latestStock.get(entity.entity) ?? 0;
-    const topUpQty = Math.max(0, entity.amt - onHand);
-    topUpByEntity.set(entity.entity, topUpQty);
     const unitOz = reserveUnitOz(entity);
-    reserveLevels.push({
+    return {
       entity: entity.entity,
       entityType: entity.entityType,
       amt: entity.amt,
       amtUnit: entity.amtUnit,
       onHand,
-      topUpQty,
+      topUpQty: Math.max(0, entity.amt - onHand),
       amtOz: entity.amt * unitOz,
       onHandOz: onHand * unitOz,
-    });
-  }
+    };
+  });
 
   // Product-level netting: a reserve-tracked product's actionable "make N"
   // total nets its demand against its own on-hand/target — surplus units
   // already on hand reduce it, a shortfall increases it, same formula
-  // either way: max(0, target + demand - onHand). topUpQty is kept as a
-  // separate, purely informational "how much of a raw buffer shortfall
-  // exists" figure — it's no longer summed into totalQty (that would
-  // double-count demand already covered by on-hand stock). The netted
+  // either way: max(0, target + demand - onHand). Not demand + topUp, which
+  // would double-count demand already covered by on-hand stock. The netted
   // totalQty (not raw demand) is what folds upward into the source
   // recipe's raw oz need, since that's the actual number of units that
   // still need making.
@@ -466,34 +436,30 @@ export async function computeProductionPlan(): Promise<ProductionPlan> {
     const product = productByName.get(entity.entity);
     const demandQty = demandByProduct.get(entity.entity) ?? 0;
     const onHand = latestStock.get(entity.entity) ?? 0;
-    const topUpQty = topUpByEntity.get(entity.entity) ?? 0;
     const totalQty = Math.max(0, entity.amt + demandQty - onHand);
     if (totalQty > 0) {
       const totalOz = Math.ceil(totalQty) * (product?.ozRecipeSourceNeeded ?? 0);
-      productRequirements.push({ product: entity.entity, demandQty, topUpQty, totalQty, totalOz });
+      productRequirements.push({ product: entity.entity, totalQty, totalOz });
     }
-    if (product) {
-      rawOzByRecipe.set(product.recipeSource, (rawOzByRecipe.get(product.recipeSource) ?? 0) + totalQty * product.ozRecipeSourceNeeded);
-    }
+    if (product) addRawOz(product.recipeSource, totalQty * product.ozRecipeSourceNeeded);
   }
   productRequirements.sort((a, b) => a.product.localeCompare(b.product));
 
   // Products with real demand but no reserve-stock row are made fresh to
   // order — no on-hand to net against, so their raw demand folds straight
-  // into the source recipe's need, same as before this change.
+  // into the source recipe's need.
   for (const [productName, demandQty] of demandByProduct) {
     if (productEntityNames.has(productName)) continue; // already handled above
     const product = productByName.get(productName);
     if (!product) continue;
-    rawOzByRecipe.set(product.recipeSource, (rawOzByRecipe.get(product.recipeSource) ?? 0) + demandQty * product.ozRecipeSourceNeeded);
+    addRawOz(product.recipeSource, demandQty * product.ozRecipeSourceNeeded);
   }
 
   // Recipe-level netting: same formula, one level up — a recipe's
   // actionable "need to brew" total nets its raw demand (direct oz-lines
   // plus everything folded up from products above) against its own
   // on-hand/target. Recipes with no reserve-stock row have nothing to net
-  // against, so their raw demand is used as-is (matches pre-netting
-  // behavior for anything not reserve-tracked).
+  // against, so their raw demand is used as-is.
   const neededByName = new Map(rawOzByRecipe);
   for (const entity of stockEntities) {
     if (entity.entityType !== "recipe") continue;
@@ -512,7 +478,6 @@ export async function computeProductionPlan(): Promise<ProductionPlan> {
       recipe: recipeName,
       category: recipe.category,
       totalNeededQty,
-      unit: "oz",
       recipeOzYieldQty: recipe.recipeOzYieldQty,
       batchesNeeded,
       surplusQty: batchesNeeded * recipe.recipeOzYieldQty - totalNeededQty,

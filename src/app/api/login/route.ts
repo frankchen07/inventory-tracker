@@ -1,6 +1,5 @@
 import { redirect } from "next/navigation";
-
-const COOKIE_NAME = "inventory_auth";
+import { COOKIE_NAME } from "@/lib/auth";
 
 function safeNextPath(value: FormDataEntryValue | null): string {
   if (typeof value !== "string" || !value.startsWith("/") || value.startsWith("//")) {

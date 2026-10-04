@@ -1,6 +1,7 @@
 import Link from "next/link";
-import { computeProductionPlan } from "@/lib/production";
-import type { BatchRequirement, DemandLine, ReserveLevel } from "@/lib/types";
+import { computeProductionPlan, RECIPE_UNIT_OZ } from "@/lib/production";
+import type { BatchRequirement, ReserveLevel } from "@/lib/types";
+import { normalizeUnit } from "@/lib/unit-conversion";
 
 export const dynamic = "force-dynamic";
 
@@ -14,6 +15,8 @@ const CATEGORY_LABEL: Record<string, string> = {
 // own raw category name, so a typo'd or future category can never silently
 // vanish from the page the way "roast" mis-typed as "order" once did.
 const CATEGORY_ORDER = ["beans", "purchase"];
+
+const OZ_PER_LB = RECIPE_UNIT_OZ.lb;
 
 // Ceiling, not nearest — an oz-derived "how much to produce" figure should
 // never round down below what's actually needed.
@@ -63,7 +66,7 @@ function InfoTooltip({ text }: { text: string }) {
 
 function batchHeadline(b: BatchRequirement): string {
   const yieldQty = b.batchesNeeded * b.recipeOzYieldQty;
-  if (b.category === "beans") return `Roast ${Math.round(yieldQty / 16)} lbs`;
+  if (b.category === "beans") return `Roast ${Math.round(yieldQty / OZ_PER_LB)} lbs`;
   if (b.category === "purchase") return `Order ${b.batchesNeeded}`;
   return `Make ${b.batchesNeeded} batch${b.batchesNeeded === 1 ? "" : "es"}`;
 }
@@ -71,17 +74,32 @@ function batchHeadline(b: BatchRequirement): string {
 // Reserve rows show exactly the colloquial amount/unit Frank wrote in the
 // "reserve stock" sheet as the primary figure (kegs, bottles, lbs, gallons —
 // whatever's natural for that entity), with the converted oz total as a
-// secondary reference — dropped only when amtUnit already is oz, since
-// showing it twice would be redundant. This is a pure on-hand-vs-target
-// snapshot — the actionable "how much to make" figure lives in "Assemble
-// Products"/"Brewing & Roasting Needed" instead, so no shortfall figure is
-// shown here.
+// secondary reference — dropped only when amtUnit already is oz. No
+// shortfall figure here; the actionable "how much to make" lives in the
+// "Brewing & Roasting Needed" sections.
 function reserveRowDisplay(r: ReserveLevel): { primary: string; secondary: string | null } {
-  const isOz = ["oz", "ounce", "ounces"].includes(r.amtUnit.trim().toLowerCase());
+  const isOz = ["oz", "ounce"].includes(normalizeUnit(r.amtUnit.trim()));
   return {
     primary: `${r.onHand} / ${r.amt} ${r.amtUnit}`,
     secondary: isOz ? null : `${ceilDisplay(r.onHandOz)} / ${ceilDisplay(r.amtOz)} oz`,
   };
+}
+
+function Section({
+  title,
+  className = "mt-6",
+  children,
+}: {
+  title: string;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className={`${className} rounded-lg border border-zinc-200`}>
+      <h2 className="border-b border-zinc-200 bg-zinc-50 px-4 py-2 text-sm font-semibold text-zinc-900">{title}</h2>
+      {children}
+    </div>
+  );
 }
 
 function BatchCard({ b }: { b: BatchRequirement }) {
@@ -90,7 +108,7 @@ function BatchCard({ b }: { b: BatchRequirement }) {
     <li className="flex items-center justify-between gap-4 px-4 py-3 text-sm">
       <span className="font-medium text-zinc-900">{b.recipe}</span>
       <span className="text-zinc-900">
-        {headline} <span className="text-zinc-400">({ceilDisplay(b.totalNeededQty)} {b.unit} needed)</span>
+        {headline} <span className="text-zinc-400">({ceilDisplay(b.totalNeededQty)} oz needed)</span>
       </span>
     </li>
   );
@@ -99,12 +117,7 @@ function BatchCard({ b }: { b: BatchRequirement }) {
 export default async function ProductionPage() {
   const plan = await computeProductionPlan();
 
-  const byCategory = new Map<string, BatchRequirement[]>();
-  for (const b of plan.batches) {
-    const list = byCategory.get(b.category) ?? [];
-    list.push(b);
-    byCategory.set(b.category, list);
-  }
+  const byCategory = Map.groupBy(plan.batches, (b) => b.category);
 
   // Everything except concentrate/ingredient (merged into the fixed-position
   // "Make Recipes" section, just above "Assemble Products", below) renders
@@ -125,13 +138,10 @@ export default async function ProductionPage() {
   const popupLines = plan.demand.filter((l) => l.channel === "popup");
   const clientLines = plan.demand.filter((l) => l.channel !== "popup");
 
-  // displayUnit is taken from whichever line for an item is seen first and
-  // never re-derived per line — safe because it depends only on `item`
-  // (via amtUnitByEntity/productsByRecipe in fillOz(), fixed per plan), so
-  // every line sharing an item necessarily agrees, *unless* a product name
-  // and a recipe name were to collide (not expected — they're distinct
-  // sheets/columns in practice). Same pre-existing assumption `oz`/
-  // `displayQty` summation above already relies on for `item` grouping.
+  // displayUnit/recipeCategory are taken from whichever line for an item is
+  // seen first — safe because fillOz() derives them from `item` alone, so
+  // every line sharing an item agrees (barring a product and a recipe with
+  // the same name).
   const popupTotals = new Map<
     string,
     { oz: number; displayQty: number | null; displayUnit: string | null; recipeCategory: string | null }
@@ -152,10 +162,6 @@ export default async function ProductionPage() {
   }
   const popupItems = [...popupTotals.keys()].sort((a, b) => a.localeCompare(b));
 
-  const clientSorted = [...clientLines].sort(
-    (a: DemandLine, b: DemandLine) => a.forDate.localeCompare(b.forDate) || a.customer.localeCompare(b.customer),
-  );
-
   return (
     <main className="mx-auto max-w-3xl px-4 py-8">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -174,10 +180,7 @@ export default async function ProductionPage() {
       </div>
 
       <p className="mt-8 text-base font-bold uppercase tracking-wide text-zinc-800">This week</p>
-      <div className="mt-2 rounded-lg border border-zinc-200">
-        <h2 className="border-b border-zinc-200 bg-zinc-50 px-4 py-2 text-sm font-semibold text-zinc-900">
-          Midwife Popup
-        </h2>
+      <Section title="Midwife Popup" className="mt-2">
         {popupItems.length === 0 ? (
           <p className="px-4 py-3 text-sm text-zinc-500">Nothing planned for the popup this week.</p>
         ) : (
@@ -191,7 +194,7 @@ export default async function ProductionPage() {
                     {t.displayQty !== null
                       ? `${roundDisplay(t.displayQty)}${t.displayUnit ? ` ${t.displayUnit}` : ""}`
                       : t.recipeCategory === "beans"
-                        ? `${roundDisplay(t.oz / 16)} lbs`
+                        ? `${roundDisplay(t.oz / OZ_PER_LB)} lbs`
                         : `${ceilDisplay(t.oz)} oz`}
                   </span>
                 </li>
@@ -199,23 +202,20 @@ export default async function ProductionPage() {
             })}
           </ul>
         )}
-      </div>
+      </Section>
 
-      <div className="mt-6 rounded-lg border border-zinc-200">
-        <h2 className="border-b border-zinc-200 bg-zinc-50 px-4 py-2 text-sm font-semibold text-zinc-900">
-          Deliveries &amp; Events
-        </h2>
-        {clientSorted.length === 0 ? (
+      <Section title="Deliveries & Events">
+        {clientLines.length === 0 ? (
           <p className="px-4 py-3 text-sm text-zinc-500">Nothing scheduled for clients this week.</p>
         ) : (
           <ul className="divide-y divide-zinc-100">
-            {clientSorted.map((line, i) => (
+            {clientLines.map((line, i) => (
               <li key={`${line.customer}-${line.item}-${i}`} className="flex items-center justify-between gap-4 px-4 py-2 text-sm">
                 <span className="text-zinc-900">{line.customer}</span>
                 <span className="text-zinc-500">
                   {line.quantityUnit === "oz" ? (
                     line.recipeCategory === "beans" ? (
-                      <>{line.item} &times; {roundDisplay(line.oz / 16)} lbs</>
+                      <>{line.item} &times; {roundDisplay(line.oz / OZ_PER_LB)} lbs</>
                     ) : (
                       <>{line.item} <span className="text-zinc-400">({ceilDisplay(line.oz)} oz)</span></>
                     )
@@ -231,7 +231,7 @@ export default async function ProductionPage() {
             ))}
           </ul>
         )}
-      </div>
+      </Section>
 
       {plan.upcomingDemand.length > 0 && (
         <div className="mt-6 rounded-lg border border-dashed border-zinc-300">
@@ -258,10 +258,7 @@ export default async function ProductionPage() {
         </div>
       )}
 
-      <div className="mt-6 rounded-lg border border-zinc-200">
-        <h2 className="border-b border-zinc-200 bg-zinc-50 px-4 py-2 text-sm font-semibold text-zinc-900">
-          Boast Reserves
-        </h2>
+      <Section title="Boast Reserves">
         <ul className="divide-y divide-zinc-100">
           {plan.reserveLevels.map((r) => {
             const { primary, secondary } = reserveRowDisplay(r);
@@ -276,7 +273,7 @@ export default async function ProductionPage() {
             );
           })}
         </ul>
-      </div>
+      </Section>
 
       <div className="mt-10 flex items-center gap-1.5 border-t border-zinc-200 pt-6">
         <p className="text-base font-bold uppercase tracking-wide text-zinc-800">Brewing &amp; Roasting Needed</p>
@@ -284,23 +281,17 @@ export default async function ProductionPage() {
       </div>
 
       {(byCategory.get("concentrate") || byCategory.get("ingredient")) && (
-        <div className="mt-2 rounded-lg border border-zinc-200">
-          <h2 className="border-b border-zinc-200 bg-zinc-50 px-4 py-2 text-sm font-semibold text-zinc-900">
-            Make Recipes
-          </h2>
+        <Section title="Make Recipes" className="mt-2">
           <ul className="divide-y divide-zinc-100">
             {[...(byCategory.get("concentrate") ?? []), ...(byCategory.get("ingredient") ?? [])].map((b) => (
               <BatchCard key={b.recipe} b={b} />
             ))}
           </ul>
-        </div>
+        </Section>
       )}
 
       {plan.productRequirements.length > 0 && (
-        <div className="mt-6 rounded-lg border border-zinc-200">
-          <h2 className="border-b border-zinc-200 bg-zinc-50 px-4 py-2 text-sm font-semibold text-zinc-900">
-            Assemble Products
-          </h2>
+        <Section title="Assemble Products">
           <ul className="divide-y divide-zinc-100">
             {plan.productRequirements.map((p) => (
               <li key={p.product} className="flex items-center justify-between gap-4 px-4 py-3 text-sm">
@@ -312,20 +303,17 @@ export default async function ProductionPage() {
               </li>
             ))}
           </ul>
-        </div>
+        </Section>
       )}
 
       {trailingCategories.map((category) => (
-        <div key={category} className="mt-6 rounded-lg border border-zinc-200">
-          <h2 className="border-b border-zinc-200 bg-zinc-50 px-4 py-2 text-sm font-semibold text-zinc-900">
-            {CATEGORY_LABEL[category] ?? category}
-          </h2>
+        <Section key={category} title={CATEGORY_LABEL[category] ?? category}>
           <ul className="divide-y divide-zinc-100">
             {byCategory.get(category)!.map((b) => (
               <BatchCard key={b.recipe} b={b} />
             ))}
           </ul>
-        </div>
+        </Section>
       ))}
     </main>
   );

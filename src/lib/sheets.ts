@@ -15,10 +15,9 @@ export const CATALOG_HEADERS = ["item", "category", "supplier", "unitConversion"
 export const SCAN_PHOTOS_SHEET = "scan photos";
 export const SCAN_PHOTOS_HEADERS = ["date", "photoUrl"] as const;
 
-// Production planning tabs — flat rows, no date columns, so plain
-// readRows/appendRow is enough. Frank creates these tabs by hand with the
-// header row already in place, same as "inventory" and "scan photos".
-// Everything downstream is oz-normalized — no per-row unit column needed.
+// Production planning tabs. Frank creates these by hand with the header row
+// already in place. readRows maps columns by position, not by name, so each
+// *_HEADERS order must match its tab's real header row exactly.
 export const RECIPES_SHEET = "recipes";
 export const RECIPES_HEADERS = ["recipe", "category", "recipeOzYieldQty"] as const;
 
@@ -31,30 +30,12 @@ export const PRODUCTS_SHEET = "products";
 // product.
 export const PRODUCTS_HEADERS = ["product", "unitOz", "recipeSource", "ozRecipeSourceNeeded"] as const;
 
+// See StandingOrder in types.ts for what each column means.
 export const STANDING_ORDERS_SHEET = "standing orders";
-// channel: "popup" (Boast's own Midwife popup) or "client" (wholesale
-// accounts/events) — a display grouping only, doesn't affect batch math.
-// quantityUnit: the raw sheet cell (e.g. "count", "oz", "lbs", "gallons",
-// "kegs", blank) — resolveQuantity() in production.ts turns this into a
-// real DemandLine's "count"|"oz" once it knows whether `item` names a
-// product or a recipe directly; see StandingOrder in types.ts.
-// anchorDate/intervalWeeks: cadence beyond weekly (e.g. triweekly, or
-// monthly approximated as every 4 weeks) — see StandingOrder in types.ts.
-// This order must match the actual "standing orders" tab's header row
-// exactly (readRows maps columns by position, not by name) — it's
-// anchorDate/intervalWeeks/active/channel in the real sheet, not the append-
-// at-the-end order originally planned. Column is labeled "item" (not
-// "product") since it's either a products-sheet name or a recipe name
-// directly — see StandingOrder in types.ts.
 export const STANDING_ORDERS_HEADERS = ["customer", "item", "quantity", "quantityUnit", "dayOfWeek", "anchorDate", "intervalWeeks", "active", "channel"] as const;
 
+// See OneOffOrder in types.ts.
 export const ORDERS_SHEET = "a la carte orders";
-// active: mirrors StandingOrder.active (TRUE/FALSE, blank = inactive) so a
-// specific one-off order can be cancelled/voided without deleting the row.
-// This order must match the actual "a la carte orders" tab's header row
-// exactly (readRows maps columns by position, not by name) — it's
-// channel/active/notes in the real sheet, not the notes/channel/active order
-// originally planned (same lesson as STANDING_ORDERS_HEADERS above).
 export const ORDERS_HEADERS = ["date", "customer", "item", "quantity", "quantityUnit", "channel", "active", "notes"] as const;
 
 // Running reserve-level tracking for finished/semi-finished production goods
@@ -88,12 +69,9 @@ export function columnLetter(index: number): string {
   return letter;
 }
 
-export type SheetRow<H extends readonly string[]> = Record<H[number], string> & {
-  _rowIndex: number;
-};
+export type SheetRow<H extends readonly string[]> = Record<H[number], string>;
 
-// Row 1 is always the header row; data starts at row 2. _rowIndex lets callers
-// target this exact row later without re-scanning the sheet.
+// Row 1 is always the header row; data starts at row 2.
 export async function readRows<H extends readonly string[]>(
   sheetName: string,
   headers: H,
@@ -105,8 +83,8 @@ export async function readRows<H extends readonly string[]>(
   });
   const values = res.data.values ?? [];
   return values
-    .map((row, i) => {
-      const obj = { _rowIndex: i + 2 } as SheetRow<H>;
+    .map((row) => {
+      const obj = {} as SheetRow<H>;
       headers.forEach((h, idx) => {
         const cell = row[idx];
         (obj as Record<string, string>)[h] = cell === undefined || cell === null ? "" : String(cell);
@@ -167,8 +145,7 @@ export interface DateColumn {
 // Date columns start right after a sheet's fixed catalog columns and run
 // left-to-right, oldest first. Defaults match "inventory" (index
 // CATALOG_HEADERS.length, i.e. column F); pass sheetName/fixedColumnCount to
-// reuse this against another sheet shaped the same way, e.g. "production
-// stock" with 3 fixed columns.
+// reuse this against another sheet shaped the same way, e.g. "reserve stock".
 export async function listDateColumns(
   sheetName: string = CATALOG_SHEET,
   fixedColumnCount: number = CATALOG_HEADERS.length,
@@ -184,13 +161,34 @@ export async function listDateColumns(
     .filter((c) => c.date !== "");
 }
 
-export async function getLatestDateColumn(
-  sheetName: string = CATALOG_SHEET,
-  fixedColumnCount: number = CATALOG_HEADERS.length,
-): Promise<DateColumn | null> {
-  const cols = await listDateColumns(sheetName, fixedColumnCount);
-  if (cols.length === 0) return null;
-  return [...cols].sort((a, b) => a.date.localeCompare(b.date))[cols.length - 1];
+// Reads every date column of a date-columned sheet in one request and merges
+// them oldest-to-newest, so a blank cell resolves to the nearest earlier
+// non-blank value for that row. This is the one place "untouched item = no
+// change" gets applied — neither entry path writes carried-forward values
+// into the sheet, so a blank cell always means "not recounted this time."
+// values[i] is data row i (sheet row i+2), "" if never counted.
+export async function readLatestValues(
+  sheetName: string,
+  fixedColumnCount: number,
+): Promise<{ values: string[]; latestDate: string | null }> {
+  const res = await getClient().spreadsheets.values.get({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `${sheetName}!${columnLetter(fixedColumnCount)}1:ZZ`,
+  });
+  const [headerRow = [], ...rows] = res.data.values ?? [];
+  const cols = headerRow
+    .map((date, i) => ({ date: String(date ?? ""), i }))
+    .filter((c) => c.date !== "")
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  const values = rows.map(() => "");
+  for (const { i } of cols) {
+    rows.forEach((row, r) => {
+      const v = String(row?.[i] ?? "");
+      if (v !== "") values[r] = v;
+    });
+  }
+  return { values, latestDate: cols.at(-1)?.date ?? null };
 }
 
 // Finds the column for a given date, creating it (as a new header cell one
@@ -212,21 +210,6 @@ export async function getOrCreateDateColumn(
     requestBody: { values: [[date]] },
   });
   return nextIndex;
-}
-
-// rowCount excludes the header row — pass catalog.length.
-export async function readColumnValues(
-  colIndex: number,
-  rowCount: number,
-  sheetName: string = CATALOG_SHEET,
-): Promise<string[]> {
-  const col = columnLetter(colIndex);
-  const res = await getClient().spreadsheets.values.get({
-    spreadsheetId: SPREADSHEET_ID,
-    range: `${sheetName}!${col}2:${col}${rowCount + 1}`,
-  });
-  const values = res.data.values ?? [];
-  return Array.from({ length: rowCount }, (_, i) => String(values[i]?.[0] ?? ""));
 }
 
 // values[i] lands in row i+2 (row 1 is the header). Pass one value per

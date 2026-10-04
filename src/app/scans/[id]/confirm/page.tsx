@@ -44,9 +44,6 @@ export default async function ConfirmScanPage({
           method="POST"
           className="min-w-0 lg:flex-1"
         >
-          <input type="hidden" name="scanDate" value={draft.scanDate} />
-          <input type="hidden" name="photoUrl" value={draft.photoUrl} />
-
           <div className="overflow-x-auto rounded-lg border border-zinc-200">
             <table className="w-full min-w-[720px] text-xs">
               <thead className="bg-zinc-50 text-left text-xs uppercase tracking-wide text-zinc-500">

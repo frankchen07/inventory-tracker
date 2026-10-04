@@ -13,8 +13,6 @@ export interface RestockItem {
   item: string;
   supplier: string;
   remaining: string;
-  remainingAtomic: number;
-  thresholdAtomic: number;
 }
 
 // A catalog item with a recorded count that couldn't be converted to a
@@ -83,7 +81,7 @@ export interface StandingOrder {
   anchorDate: string;
 }
 
-// "orders" sheet: one-off demand for a specific date. See StandingOrder for
+// "a la carte orders" sheet: one-off demand for a specific date. See StandingOrder for
 // what quantityUnit/item mean, and for active (blank = inactive, same
 // convention — lets a specific one-off order be cancelled/voided without
 // deleting the row).
@@ -134,13 +132,12 @@ export interface DemandLine {
 // How much of one recipe product is needed this week, and how many batches
 // that requires. totalNeededQty is already netted against on-hand reserve
 // stock (max(0, target + demand - onHand), or raw demand as-is for a recipe
-// with no reserve-stock row) — see computeProductionPlan() in production.ts.
-// unit is always "oz".
+// with no reserve-stock row) — see buildProductionPlan() in production.ts.
+// All quantities are oz.
 export interface BatchRequirement {
   recipe: string;
   category: string;
   totalNeededQty: number;
-  unit: string;
   recipeOzYieldQty: number;
   batchesNeeded: number;
   surplusQty: number;
@@ -160,9 +157,8 @@ export interface ProductionStockEntity {
 // gets one of these regardless of whether it's currently short (topUpQty may
 // be 0), powering the always-visible "Reserve" section. This is a pure
 // on-hand-vs-target snapshot ("is my safety stock intact") — topUpQty is
-// informational only here and is *not* what feeds batch/product totals;
-// those net demand against on-hand directly (see ProductRequirement and
-// BatchRequirement) rather than reusing this raw shortfall figure.
+// informational only and is *not* what feeds batch/product totals; those
+// net demand against on-hand directly (see buildProductionPlan()).
 export interface ReserveLevel {
   entity: string;
   entityType: "recipe" | "product";
@@ -190,19 +186,14 @@ export interface ReserveLevel {
 // when it has real demand; its demand is folded into its source instead.
 export interface ProductRequirement {
   product: string;
-  demandQty: number;
-  // Informational only: the raw max(0, target - onHand) buffer shortfall,
-  // ignoring demand entirely. NOT summed into totalQty — see totalQty.
-  topUpQty: number;
   // The actionable "make N" figure: demand netted against on-hand/target,
-  // max(0, target + demandQty - onHand) — NOT demandQty + topUpQty, since
-  // that would double-count demand already covered by on-hand stock.
+  // max(0, target + demand - onHand).
   totalQty: number;
   // Oz of source recipe consumed to produce the whole-unit count shown as
   // "Make N" (i.e. Math.ceil(totalQty) * product.ozRecipeSourceNeeded) — a
   // display-only figure, deliberately NOT the same number that actually
   // folds into the source recipe's raw oz need (which uses the unrounded
-  // totalQty — see rawOzByRecipe in computeProductionPlan()). Rounding
+  // totalQty — see rawOzByRecipe in buildProductionPlan()). Rounding
   // totalQty up here keeps "Make 2" and its oz figure mutually consistent
   // (2 whole bottles really do take this much oz), instead of pairing a
   // rounded-up count with the smaller, unrounded raw-demand oz figure.
@@ -226,6 +217,7 @@ export interface ProductionPlan {
   productRequirements: ProductRequirement[];
 }
 
+// One OCR-read row of a count sheet.
 export interface ScanDraftLineItem {
   item: string;
   reportedQuantityText: string;
