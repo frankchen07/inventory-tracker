@@ -193,15 +193,16 @@ export interface ProductRequirement {
   // The actionable "make N" figure: demand netted against on-hand/target,
   // max(0, target + demand - onHand).
   totalQty: number;
-  // Oz of source recipe consumed to produce the whole-unit count shown as
-  // "Make N" (i.e. Math.ceil(totalQty) * product.ozRecipeSourceNeeded) — a
-  // display-only figure, deliberately NOT the same number that actually
+  // Oz of recipeSource (not the product's own volume) consumed to produce the
+  // whole-unit count shown as "Make N" (i.e. Math.ceil(totalQty) *
+  // product.ozRecipeSourceNeeded) — a display-only figure, deliberately NOT the same number that actually
   // folds into the source recipe's raw oz need (which uses the unrounded
   // totalQty — see rawOzByRecipe in buildProductionPlan()). Rounding
   // totalQty up here keeps "Make 2" and its oz figure mutually consistent
   // (2 whole bottles really do take this much oz), instead of pairing a
   // rounded-up count with the smaller, unrounded raw-demand oz figure.
   totalOz: number;
+  recipeSource: string;
 }
 
 // windowStart/windowEnd are a rolling ~9-day capture window starting today

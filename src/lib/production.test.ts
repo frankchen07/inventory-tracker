@@ -108,8 +108,8 @@ test("reserve levels: every entity, converted to oz", () => {
 
 test("product requirements net demand against on-hand and target", () => {
   assert.deepEqual(
-    plan.productRequirements.map((p) => [p.product, p.totalQty, p.totalOz]),
-    [["nitro keg", 4, 512]],
+    plan.productRequirements.map((p) => [p.product, p.totalQty, p.totalOz, p.recipeSource]),
+    [["nitro keg", 4, 512, "cold brew"]],
   );
 });
 

@@ -440,7 +440,7 @@ export function buildProductionPlan(
     const totalQty = Math.max(0, entity.amt + demandQty - onHand);
     if (totalQty > 0) {
       const totalOz = Math.ceil(totalQty) * (product?.ozRecipeSourceNeeded ?? 0);
-      productRequirements.push({ product: entity.entity, totalQty, totalOz });
+      productRequirements.push({ product: entity.entity, totalQty, totalOz, recipeSource: product?.recipeSource ?? "" });
     }
     if (product) addRawOz(product.recipeSource, totalQty * product.ozRecipeSourceNeeded);
   }

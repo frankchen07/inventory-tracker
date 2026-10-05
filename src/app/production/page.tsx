@@ -297,8 +297,13 @@ export default async function ProductionPage() {
               <li key={p.product} className="flex items-center justify-between gap-4 px-4 py-3 text-sm">
                 <span className="font-medium text-zinc-900">{p.product}</span>
                 <span className="text-zinc-900">
-                  Make {ceilDisplay(p.totalQty)}{" "}
-                  <span className="text-zinc-400">({ceilDisplay(p.totalOz)} oz)</span>
+                  Make {ceilDisplay(p.totalQty)}
+                  {p.recipeSource && (
+                    <span className="text-zinc-400">
+                      {" "}
+                      (uses {ceilDisplay(p.totalOz)} oz of {p.recipeSource})
+                    </span>
+                  )}
                 </span>
               </li>
             ))}
