@@ -28,23 +28,29 @@ export async function POST(request: Request) {
 
   const bytes = Buffer.from(await photo.arrayBuffer());
 
-  const catalog = await getCatalog();
+  try {
+    const catalog = await getCatalog();
 
-  const lineItems = await extractInventoryFromPhoto(
-    bytes.toString("base64"),
-    photo.type as "image/jpeg" | "image/png" | "image/webp",
-    catalog,
-  );
+    const lineItems = await extractInventoryFromPhoto(
+      bytes.toString("base64"),
+      photo.type as "image/jpeg" | "image/png" | "image/webp",
+      catalog,
+    );
 
-  const photoUrl = await uploadScanPhoto(`${scanDate}-${Date.now()}.${ext}`, bytes, photo.type);
+    const photoUrl = await uploadScanPhoto(`${scanDate}-${Date.now()}.${ext}`, bytes, photo.type);
 
-  const draftId = randomUUID();
-  await uploadScanDraft({
-    id: draftId,
-    scanDate,
-    photoUrl,
-    lineItems,
-  });
+    const draftId = randomUUID();
+    await uploadScanDraft({
+      id: draftId,
+      scanDate,
+      photoUrl,
+      lineItems,
+    });
 
-  return NextResponse.json({ draftId });
+    return NextResponse.json({ draftId });
+  } catch (err) {
+    console.error("scan upload failed", err);
+    const reason = err instanceof Error ? err.message : String(err);
+    return NextResponse.json({ error: `Couldn't process the scan: ${reason}` }, { status: 502 });
+  }
 }

@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { uploadErrorMessage } from "./upload-error";
 
 type Status = "idle" | "processing" | "error";
 
@@ -26,8 +27,11 @@ export function UploadForm({ defaultDate }: { defaultDate: string }) {
       body.set("photo", file);
 
       const res = await fetch("/api/scans/upload", { method: "POST", body });
+      if (res.redirected && new URL(res.url).pathname === "/login") {
+        throw new Error("Your session expired. Log in again, then re-upload.");
+      }
       if (!res.ok) {
-        throw new Error((await res.json()).error ?? "could not process sheet");
+        throw new Error(uploadErrorMessage(res.status, await res.text()));
       }
       const { draftId } = await res.json();
       router.push(`/scans/${draftId}/confirm`);
