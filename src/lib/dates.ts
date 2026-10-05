@@ -15,8 +15,16 @@ export function addDays(date: string, days: number): string {
   return isoDate(d);
 }
 
-export function todayISO(): string {
-  return isoDate(new Date());
+// The server runs in UTC; "today" is the shop's calendar day.
+const SHOP_DATE_FORMAT = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "America/Los_Angeles",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
+export function todayISO(now = new Date()): string {
+  return SHOP_DATE_FORMAT.format(now);
 }
 
 // Monday of the calendar week containing `date` (JS getDay(): Sun=0..Sat=6).
