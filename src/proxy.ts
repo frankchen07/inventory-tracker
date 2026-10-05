@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import { COOKIE_NAME } from "@/lib/auth";
+import { COOKIE_NAME, sessionSecret, verifySessionToken } from "@/lib/auth";
 
 export function proxy(request: NextRequest) {
-  const cookie = request.cookies.get(COOKIE_NAME)?.value;
-  if (process.env.APP_PASSPHRASE && cookie === process.env.APP_PASSPHRASE) {
+  if (verifySessionToken(request.cookies.get(COOKIE_NAME)?.value, sessionSecret())) {
     return NextResponse.next();
   }
 

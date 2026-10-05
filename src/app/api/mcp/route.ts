@@ -1,5 +1,6 @@
 import { createMcpHandler } from "mcp-handler";
 import { z } from "zod";
+import { safeEqual } from "@/lib/auth";
 import { todayISO } from "@/lib/dates";
 import { getCatalog, writeCountColumn } from "@/lib/inventory";
 
@@ -67,7 +68,8 @@ const mcpHandler = createMcpHandler(
 function isAuthorized(request: Request): boolean {
   const header = request.headers.get("authorization") ?? "";
   const token = header.startsWith("Bearer ") ? header.slice("Bearer ".length) : "";
-  return Boolean(process.env.MCP_ACCESS_TOKEN) && token === process.env.MCP_ACCESS_TOKEN;
+  const expected = process.env.MCP_ACCESS_TOKEN;
+  return expected ? safeEqual(token, expected) : false;
 }
 
 async function authedHandler(request: Request): Promise<Response> {
