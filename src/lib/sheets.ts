@@ -230,28 +230,21 @@ export interface RowCell {
   value: string;
 }
 
-// One value per sheet row from row 2 down to the last given row, so a blank
-// spacer row between items is written blank instead of shifting the rows
-// below it up. cells must be in ascending rowIndex order (as readRows returns them).
-export function columnByRow(cells: RowCell[]): string[] {
-  const values = Array<string>(Math.max(0, (cells.at(-1)?.rowIndex ?? 1) - 1)).fill("");
-  for (const { rowIndex, value } of cells) values[rowIndex - 2] = value;
-  return values;
+// One range per cell, so rows not passed in — including items already
+// counted earlier the same day — are never touched.
+export function cellUpdates(sheetName: string, colIndex: number, cells: RowCell[]): sheets_v4.Schema$ValueRange[] {
+  const col = columnLetter(colIndex);
+  return cells.map(({ rowIndex, value }) => ({ range: `${sheetName}!${col}${rowIndex}`, values: [[value]] }));
 }
 
-// Callers are responsible for carry-forward — pass "" for anything not
-// recounted.
-export async function writeColumnValues(
+export async function writeCells(
   colIndex: number,
   cells: RowCell[],
   sheetName: string = CATALOG_SHEET,
 ): Promise<void> {
-  const values = columnByRow(cells);
-  const col = columnLetter(colIndex);
-  await getClient().spreadsheets.values.update({
+  if (cells.length === 0) return;
+  await getClient().spreadsheets.values.batchUpdate({
     spreadsheetId: SPREADSHEET_ID,
-    range: `${sheetName}!${col}2:${col}${values.length + 1}`,
-    valueInputOption: "USER_ENTERED",
-    requestBody: { values: values.map((v) => [v]) },
+    requestBody: { valueInputOption: "USER_ENTERED", data: cellUpdates(sheetName, colIndex, cells) },
   });
 }

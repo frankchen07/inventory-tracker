@@ -8,7 +8,7 @@ import {
   ensureSheetWithHeaders,
   getOrCreateDateColumn,
   readLatestValues,
-  writeColumnValues,
+  writeCells,
 } from "@/lib/sheets";
 import { parseConversion, parseReportedQuantity, parseThreshold } from "@/lib/unit-conversion";
 import type { CatalogItem, NeedsReviewItem, RestockItem } from "@/lib/types";
@@ -77,16 +77,20 @@ export function computeRestockList(catalog: CatalogItem[], counts: Map<string, s
 }
 
 // Writes a new (or updates an existing) date column. `valuesByItem` should
-// only contain items actually recounted this time — everything else is left
-// blank so readLatestValues() carries the prior value forward at read time.
+// only contain items actually recounted this time — every other cell is left
+// as-is, so readLatestValues() carries the prior value forward at read time
+// and a second entry on the same day doesn't wipe the first.
 export async function writeCountColumn(
   date: string,
   valuesByItem: Map<string, string>,
   catalog: CatalogItem[],
 ): Promise<void> {
   const colIndex = await getOrCreateDateColumn(date);
-  const cells = catalog.map((c) => ({ rowIndex: c.rowIndex, value: valuesByItem.get(c.item) ?? "" }));
-  await writeColumnValues(colIndex, cells);
+  const cells = catalog.flatMap((c) => {
+    const value = valuesByItem.get(c.item);
+    return value === undefined ? [] : [{ rowIndex: c.rowIndex, value }];
+  });
+  await writeCells(colIndex, cells);
 }
 
 export async function recordScanPhoto(date: string, photoUrl: string): Promise<void> {

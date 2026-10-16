@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { columnByRow, mergeDateColumns, parseRows } from "@/lib/sheets";
+import { cellUpdates, mergeDateColumns, parseRows } from "@/lib/sheets";
 
 test("parseRows drops blank rows but keeps each row's real sheet row number", () => {
   const rows = parseRows(
@@ -37,14 +37,16 @@ test("mergeDateColumns with no date columns", () => {
   assert.equal(latest.valueAtRow(2), "");
 });
 
-test("columnByRow leaves a blank spacer row blank instead of shifting rows up", () => {
+test("cellUpdates targets only the given rows, so other items in the column are left alone", () => {
   assert.deepEqual(
-    columnByRow([
+    cellUpdates("inventory", 6, [
       { rowIndex: 2, value: "1 box" },
-      { rowIndex: 4, value: "" },
       { rowIndex: 5, value: "3 packs" },
     ]),
-    ["1 box", "", "", "3 packs"],
+    [
+      { range: "inventory!G2", values: [["1 box"]] },
+      { range: "inventory!G5", values: [["3 packs"]] },
+    ],
   );
-  assert.deepEqual(columnByRow([]), []);
+  assert.deepEqual(cellUpdates("inventory", 6, []), []);
 });

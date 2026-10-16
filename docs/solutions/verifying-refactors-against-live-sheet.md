@@ -23,8 +23,9 @@ without Frank's OK.
 
 ## Why it wasn't obvious
 - tsx treats `.ts` as CJS here (no `"type": "module"`), so top-level `await` fails — use `.mts`.
-- Any rows-by-position code (`readLatestValues`, `writeColumnValues`) assumes the catalog has no
-  blank spacer rows; `readRows` drops blank rows, so one spacer silently misaligns counts.
+- `readRows` drops blank rows, so anything lining counts up with items must go by `_rowIndex`
+  (the real sheet row), never list position — one spacer row would silently misalign counts.
+  Count writes (`writeCells`) touch only the cells passed in, so same-day entries don't clobber.
 - A server component that calls `new Date()` with no dynamic API is prerendered at build time
   (`/scans/upload` shows ○ Static in `next build`) — its "today" is the deploy date.
 
