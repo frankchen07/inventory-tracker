@@ -84,3 +84,25 @@ export function parseReportedQuantity(text: string, levels: UnitLevel[]): number
 export function parseThresholdQuantity(text: string, levels: UnitLevel[]): number | null {
   return parseReportedQuantity(text.split(/\s+or\s+/i)[0], levels);
 }
+
+export type ThresholdCheck = { ok: true } | { ok: false; reason: string };
+
+// Stricter than parseReportedQuantity on purpose: each part must be exactly
+// "<number> <unit>", since "2 boxes of cups" would otherwise be read as 2 cups.
+export function checkThreshold(threshold: string, unitConversion: string): ThresholdCheck {
+  const levels = parseConversion(unitConversion);
+  if (levels.length === 0) {
+    return {
+      ok: false,
+      reason: `Can't read unit conversion "${unitConversion}" — expected e.g. "1 box has 12 sleeves with 50 cups per sleeve". Fix it in the sheet first.`,
+    };
+  }
+
+  const t = threshold.trim();
+  const units = levels.map((l) => l.unit).join(", ");
+  const exact = t.split(/\s+and\s+/i).every((part) => /^\d+(?:\.\d+)?\s+[\w-]+$/.test(part.trim()));
+  if (!exact || parseReportedQuantity(t, levels) === null) {
+    return { ok: false, reason: `"${t}" should be one amount in this item's units (${units}), e.g. "1 ${levels[0].unit}".` };
+  }
+  return { ok: true };
+}

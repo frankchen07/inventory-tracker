@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { normalizeUnit, parseConversion, parseReportedQuantity, parseThresholdQuantity } from "@/lib/unit-conversion";
+import { checkThreshold, normalizeUnit, parseConversion, parseReportedQuantity, parseThresholdQuantity } from "@/lib/unit-conversion";
 
 test("normalizeUnit singularizes", () => {
   assert.equal(normalizeUnit("Boxes"), "box");
@@ -59,4 +59,24 @@ test("parseReportedQuantity won't guess between two named units", () => {
   const levels = parseConversion("1 box has 12 sleeves with 50 cups per sleeve");
   assert.equal(parseReportedQuantity("3 sleeves of cups", levels), null);
   assert.equal(parseReportedQuantity("2 full boxes", levels), 1200);
+});
+
+test("checkThreshold accepts any single quantity that converts", () => {
+  const cups = "1 box has 12 sleeves with 50 cups per sleeve";
+  assert.deepEqual(checkThreshold("10 sleeves", cups), { ok: true });
+  assert.deepEqual(checkThreshold("500 cups", cups), { ok: true });
+  assert.deepEqual(checkThreshold("1 box and 2 sleeves", cups), { ok: true });
+  assert.deepEqual(checkThreshold("3 packs", "1 pack has 1120 napkins, 4 packs per box"), { ok: true });
+  assert.deepEqual(checkThreshold("1 bottle", "1 bottle is 32 oz, no case breakdown"), { ok: true });
+});
+
+test("checkThreshold rejects what wouldn't convert, naming the valid units", () => {
+  const cups = "1 box has 12 sleeves with 50 cups per sleeve";
+  const bags = checkThreshold("2 bags", cups);
+  assert.equal(bags.ok, false);
+  assert.match(!bags.ok ? bags.reason : "", /box, sleeve, cup/);
+  assert.equal(checkThreshold("2 boxes of cups", "1 box has 192 cups").ok, false);
+  assert.equal(checkThreshold("1 box or 12 sleeves", cups).ok, false);
+  assert.equal(checkThreshold("", cups).ok, false);
+  assert.equal(checkThreshold("1 box", "").ok, false);
 });

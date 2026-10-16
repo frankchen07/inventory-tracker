@@ -9,6 +9,7 @@ import {
   getOrCreateDateColumn,
   readLatestValues,
   writeCells,
+  writeRow,
 } from "@/lib/sheets";
 import { parseConversion, parseReportedQuantity, parseThresholdQuantity } from "@/lib/unit-conversion";
 import type { CatalogItem, NeedsReviewItem, RestockItem } from "@/lib/types";
@@ -23,6 +24,26 @@ export async function getCatalog(): Promise<CatalogItem[]> {
     threshold: r.threshold,
     rowIndex: r._rowIndex,
   }));
+}
+
+export function findCatalogItem(catalog: CatalogItem[], name: string): CatalogItem | undefined {
+  const wanted = name.trim().toLowerCase();
+  return catalog.find((c) => c.item.toLowerCase() === wanted);
+}
+
+export async function writeThreshold(item: CatalogItem, threshold: string): Promise<void> {
+  await writeCells(CATALOG_HEADERS.indexOf("threshold"), [{ rowIndex: item.rowIndex, value: threshold }]);
+}
+
+// New items go one row past the current last item; date-column cells for
+// that row start blank, i.e. "never counted".
+export async function addCatalogItem(
+  catalog: CatalogItem[],
+  record: Omit<CatalogItem, "rowIndex">,
+): Promise<number> {
+  const rowIndex = Math.max(1, ...catalog.map((c) => c.rowIndex)) + 1;
+  await writeRow(CATALOG_SHEET, CATALOG_HEADERS, rowIndex, record);
+  return rowIndex;
 }
 
 export interface InventorySnapshot {

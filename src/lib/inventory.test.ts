@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { computeRestockList } from "@/lib/inventory";
+import { computeRestockList, findCatalogItem } from "@/lib/inventory";
 import type { CatalogItem } from "@/lib/types";
 
 const item = (name: string, rowIndex: number): CatalogItem => ({
@@ -10,6 +10,12 @@ const item = (name: string, rowIndex: number): CatalogItem => ({
   unitConversion: "",
   threshold: "",
   rowIndex,
+});
+
+test("findCatalogItem matches case- and whitespace-insensitively", () => {
+  const catalog = [item("oat milk", 32), item("12 oz paper cup", 2)];
+  assert.equal(findCatalogItem(catalog, "  Oat Milk ")?.rowIndex, 32);
+  assert.equal(findCatalogItem(catalog, "oatmilk"), undefined);
 });
 
 test("computeRestockList converts thresholds like counts, legacy 'or' cells by their first amount", () => {

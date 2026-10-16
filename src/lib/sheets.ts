@@ -115,6 +115,23 @@ export async function appendRow<H extends readonly string[]>(
   });
 }
 
+// Writes a whole row at a known position rather than via values.append, whose
+// table detection decides the target row itself.
+export async function writeRow<H extends readonly string[]>(
+  sheetName: string,
+  headers: H,
+  rowIndex: number,
+  record: Record<H[number], string>,
+): Promise<void> {
+  const values = headers.map((h) => record[h as H[number]] ?? "");
+  await getClient().spreadsheets.values.update({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `${sheetName}!A${rowIndex}:${columnLetter(headers.length - 1)}${rowIndex}`,
+    valueInputOption: "USER_ENTERED",
+    requestBody: { values: [values] },
+  });
+}
+
 export async function ensureSheetWithHeaders<H extends readonly string[]>(
   sheetName: string,
   headers: H,
