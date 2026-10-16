@@ -10,7 +10,7 @@ import {
   readLatestValues,
   writeCells,
 } from "@/lib/sheets";
-import { parseConversion, parseReportedQuantity, parseThreshold } from "@/lib/unit-conversion";
+import { parseConversion, parseReportedQuantity, parseThresholdQuantity } from "@/lib/unit-conversion";
 import type { CatalogItem, NeedsReviewItem, RestockItem } from "@/lib/types";
 
 export async function getCatalog(): Promise<CatalogItem[]> {
@@ -61,7 +61,7 @@ export function computeRestockList(catalog: CatalogItem[], counts: Map<string, s
 
     const levels = parseConversion(item.unitConversion);
     const remainingAtomic = parseReportedQuantity(countText, levels);
-    const thresholdAtomic = parseThreshold(item.threshold);
+    const thresholdAtomic = parseThresholdQuantity(item.threshold, levels);
 
     if (remainingAtomic === null || thresholdAtomic === null) {
       needsReview.push({ item: item.item, supplier: item.supplier, countText });
