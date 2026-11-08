@@ -82,12 +82,13 @@ function resolveQuantity(
   return { quantity: rawQuantity, quantityUnit: "count" };
 }
 
-// Brewing/roasting happens Monday/Tuesday; usage, keg delivery, and
-// espresso-concentrate delivery all happen Wednesday-Saturday of that same
-// week. So "what to make" is never about a single day — it's the whole
-// week's Wed-Sat window, computed off today's date regardless of which of
-// those days it's actually opened on.
-const WINDOW_DAYS = ["Wednesday", "Thursday", "Friday", "Saturday"];
+// Brewing/roasting happens Monday/Tuesday and covers everything going out
+// from that Wednesday through the following Tuesday — popup, deliveries and
+// catering alike. So "what to make" is never about a single day — it's the
+// whole Wed-Tue window, computed off today's date regardless of which day
+// it's actually opened on. A Monday/Tuesday order lands at the *end* of the
+// window, prepped a week ahead, never in the same days as production.
+const WINDOW_DAYS = ["Wednesday", "Thursday", "Friday", "Saturday", "Sunday", "Monday", "Tuesday"];
 
 function parseChannel(raw: string): string {
   return raw.trim().toLowerCase() === "popup" ? "popup" : "client";
@@ -146,15 +147,17 @@ export async function getStandingOrders(): Promise<StandingOrder[]> {
 }
 
 // Whether a standing order's cadence puts it "in phase" for the calendar
-// week containing popupWeekStart. intervalWeeks <= 1 (weekly, or a
-// blank/garbage value), a blank anchorDate, and an anchorDate that doesn't
-// parse to a real date (typo, wrong format) all short-circuit to always due
-// — see StandingOrder in types.ts for why a missing/unusable anchor fails
-// open instead of silently dropping the order.
-function isDueThisWeek(order: StandingOrder, popupWeekStart: string): boolean {
+// week containing `date`, the day it would actually go out — not the
+// window's Wednesday, since a Tuesday at the end of the window falls in the
+// next calendar week. intervalWeeks <= 1 (weekly, or a blank/garbage value),
+// a blank anchorDate, and an anchorDate that doesn't parse to a real date
+// (typo, wrong format) all short-circuit to always due — see StandingOrder
+// in types.ts for why a missing/unusable anchor fails open instead of
+// silently dropping the order.
+function isDueOn(order: StandingOrder, date: string): boolean {
   if (order.intervalWeeks <= 1 || !order.anchorDate) return true;
   const anchorMonday = mondayOfWeek(order.anchorDate);
-  const thisMonday = mondayOfWeek(popupWeekStart);
+  const thisMonday = mondayOfWeek(date);
   const weeksSince = Math.round(
     (parseDate(thisMonday).getTime() - parseDate(anchorMonday).getTime()) / (7 * 86400000),
   );
@@ -183,14 +186,16 @@ function toDemandLine(
   };
 }
 
-// Builds one standing order's demand line against a specific week's
-// Wednesday (weekStart) — used both for this week's real demand and for
-// next week's look-ahead notice, so the two never drift apart in shape.
-// Returns null if dayOfWeek doesn't match anything in the Wed-Sat window.
+// Builds one standing order's demand line against a specific window's
+// Wednesday (weekStart) — used both for this window's real demand and for
+// next window's look-ahead notice, so the two never drift apart in shape.
+// Returns null if the order is out of phase that week, or if dayOfWeek
+// isn't a real weekday.
 function standingOrderDemandLine(order: StandingOrder, weekStart: string, recipeNames: Set<string>): DemandLine | null {
   const dayIndex = WINDOW_DAYS.findIndex((d) => d.toLowerCase() === order.dayOfWeek.trim().toLowerCase());
   if (dayIndex === -1) return null;
-  return toDemandLine(order, addDays(weekStart, dayIndex), recipeNames);
+  const date = addDays(weekStart, dayIndex);
+  return isDueOn(order, date) ? toDemandLine(order, date, recipeNames) : null;
 }
 
 export async function getOneOffOrders(): Promise<OneOffOrder[]> {
@@ -218,65 +223,62 @@ export async function getProductionStockEntities(): Promise<ProductionStockEntit
   }));
 }
 
-// Standing orders that are active, in-phase for this week (isDueThisWeek —
-// always true for weekly orders), and whose dayOfWeek falls in the Wed-Sat
-// window (mapped to a concrete date via its offset from popupWeekStart,
-// always this calendar week's Wednesday — standing demand only ever happens
-// Wed-Sat, so this anchor stays fixed regardless of how wide the capture
-// window itself is), plus one-off orders whose date falls anywhere within
-// [windowStart, windowEnd]. Every line carries forDate so the UI can group
-// deliveries by day. `standing`/`oneOff` are passed in (rather than fetched
-// here) so computeProductionPlan() can fetch every sheet exactly once, in
-// parallel, and share the standing-orders list with
-// getUpcomingStandingDemand() instead of reading that tab twice.
+// Active one-off orders dated within the 7-day window starting weekStart.
+function oneOffDemand(oneOff: OneOffOrder[], weekStart: string, recipeNames: Set<string>): DemandLine[] {
+  const windowEnd = addDays(weekStart, 6);
+  return oneOff
+    .filter((order) => order.active && order.date >= weekStart && order.date <= windowEnd)
+    .map((order) => toDemandLine(order, order.date, recipeNames));
+}
+
+// Standing orders that are active and in phase on the day they'd go out
+// (always true for weekly orders), mapped onto a concrete date in the Wed-Tue
+// window starting weekStart, plus one-off orders dated within that window.
+// Every line carries forDate so the UI can group deliveries by day.
+// `standing`/`oneOff` are passed in (rather than fetched here) so
+// computeProductionPlan() can fetch every sheet exactly once, in parallel,
+// and share them with getUpcomingDemand() instead of reading each tab twice.
 export function getDemandForWindow(
   standing: StandingOrder[],
   oneOff: OneOffOrder[],
-  popupWeekStart: string,
-  windowStart: string,
-  windowEnd: string,
+  weekStart: string,
   recipeNames: Set<string>,
 ): DemandLine[] {
   const demand: DemandLine[] = [];
   for (const order of standing) {
     if (!order.active) continue;
-    if (!isDueThisWeek(order, popupWeekStart)) continue;
-    const line = standingOrderDemandLine(order, popupWeekStart, recipeNames);
+    const line = standingOrderDemandLine(order, weekStart, recipeNames);
     if (line) demand.push(line);
   }
-  for (const order of oneOff) {
-    if (!order.active) continue;
-    if (order.date >= windowStart && order.date <= windowEnd) {
-      demand.push(toDemandLine(order, order.date, recipeNames));
-    }
-  }
+  demand.push(...oneOffDemand(oneOff, weekStart, recipeNames));
   demand.sort(byDateThenCustomer);
   return demand;
 }
 
-// Non-weekly (intervalWeeks > 1) standing orders due *next* calendar week —
-// purely informational, e.g. so a triweekly keg customer's delivery shows up
-// a week ahead of time to leave lead time for ordering extra supplies.
-// Deliberately excludes weekly orders (business as usual, no notice needed)
-// and never feeds computeProductionPlan()'s batch totals — widening what
-// actually gets *produced* this week to cover next week's periodic demand
-// would double-count that order's oz (once as an early "preview" this week,
-// then again for real next week).
-export function getUpcomingStandingDemand(
+// Next window's non-weekly (intervalWeeks > 1) standing orders and one-off
+// orders — purely informational, e.g. so a triweekly keg customer's delivery
+// shows up a week ahead of time to leave lead time for ordering extra
+// supplies. Deliberately excludes weekly orders (business as usual, no
+// notice needed) and never feeds computeProductionPlan()'s batch totals —
+// widening what actually gets *produced* this week to cover next week's
+// demand would double-count that order's oz (once as an early "preview" this
+// week, then again for real next week).
+export function getUpcomingDemand(
   standing: StandingOrder[],
-  popupWeekStart: string,
+  oneOff: OneOffOrder[],
+  weekStart: string,
   recipeNames: Set<string>,
 ): DemandLine[] {
-  const nextWeekStart = addDays(popupWeekStart, 7);
+  const nextWeekStart = addDays(weekStart, 7);
 
   const upcoming: DemandLine[] = [];
   for (const order of standing) {
     if (!order.active || order.intervalWeeks <= 1) continue;
-    if (isDueThisWeek(order, popupWeekStart)) continue; // already showing in this week's demand
-    if (!isDueThisWeek(order, nextWeekStart)) continue;
+    if (standingOrderDemandLine(order, weekStart, recipeNames)) continue; // already showing in this window's demand
     const line = standingOrderDemandLine(order, nextWeekStart, recipeNames);
     if (line) upcoming.push(line);
   }
+  upcoming.push(...oneOffDemand(oneOff, nextWeekStart, recipeNames));
   upcoming.sort(byDateThenCustomer);
   return upcoming;
 }
@@ -293,13 +295,9 @@ export function getUpcomingStandingDemand(
 // with no matching `products` row are left out of the batch totals but
 // still show up in `demand`.
 //
-// windowStart/windowEnd are a rolling ~9-day capture window starting today
-// (not tied to the calendar week) — wide enough that an order due early next
-// week is already visible today, with enough lead time to brew/roast for it
-// during this week's Mon/Tue production slot. Standing orders still map onto
-// this calendar week's actual Wed-Sat dates via the separate popupWeekStart
-// anchor, so they never double up even though the capture window is wider
-// than one Wed-Sat block.
+// windowStart/windowEnd are this calendar week's Wednesday through the
+// following Tuesday (see WINDOW_DAYS). Next window's orders show up early
+// as upcomingDemand, for lead time.
 export async function computeProductionPlan(): Promise<ProductionPlan> {
   const [standing, oneOff, recipes, products, stockEntities, latest] = await Promise.all([
     getStandingOrders(),
@@ -312,7 +310,13 @@ export async function computeProductionPlan(): Promise<ProductionPlan> {
   // A physical count is ground truth as of the date it was taken, carried
   // forward until the next one; never counted reads as 0.
   const latestStock = new Map(stockEntities.map((e) => [e.entity, Number(latest.valueAtRow(e.rowIndex)) || 0]));
-  return buildProductionPlan({ standing, oneOff, recipes, products, stockEntities, latestStock }, todayISO());
+  const countDates = new Map(
+    stockEntities.flatMap((e) => {
+      const date = latest.dateAtRow(e.rowIndex);
+      return date ? [[e.entity, date] as const] : [];
+    }),
+  );
+  return buildProductionPlan({ standing, oneOff, recipes, products, stockEntities, latestStock, countDates }, todayISO());
 }
 
 export interface ProductionInputs {
@@ -322,25 +326,39 @@ export interface ProductionInputs {
   products: Product[];
   stockEntities: ProductionStockEntity[];
   latestStock: Map<string, number>;
+  // Date of each reserve entity's latest count; missing if never counted.
+  countDates: Map<string, string>;
 }
 
 export function buildProductionPlan(
-  { standing, oneOff, recipes, products, stockEntities, latestStock }: ProductionInputs,
+  { standing, oneOff, recipes, products, stockEntities, latestStock, countDates }: ProductionInputs,
   today: string,
 ): ProductionPlan {
-  const monday = mondayOfWeek(today);
-  const popupWeekStart = addDays(monday, 2);
-  const windowStart = today;
-  const windowEnd = addDays(today, 8);
+  const windowStart = addDays(mondayOfWeek(today), 2);
+  const windowEnd = addDays(windowStart, 6);
 
   const recipeNames = new Set(recipes.map((r) => r.recipe));
-  const demand = getDemandForWindow(standing, oneOff, popupWeekStart, windowStart, windowEnd, recipeNames);
-  const upcomingDemandRaw = getUpcomingStandingDemand(standing, popupWeekStart, recipeNames);
+  const windowDemand = getDemandForWindow(standing, oneOff, windowStart, recipeNames);
+  const upcomingDemandRaw = getUpcomingDemand(standing, oneOff, windowStart, recipeNames);
 
   const recipeByName = new Map(recipes.map((r) => [r.recipe, r]));
   const productByName = new Map(products.map((p) => [p.product, p]));
   const productsByRecipe = Map.groupBy(products, (p) => p.recipeSource);
   const amtUnitByEntity = new Map(stockEntities.map((e) => [e.entity, e.amtUnit]));
+
+  // Counts are taken after service, so an order dated on or before an item's
+  // count is already reflected in it — subtracting it again would double-count.
+  // An order is checked against the reserve it draws from: its own row, else
+  // its product's recipe row. With no count to check against, an order drops
+  // off once its day has passed (it's been made and delivered).
+  const stockEntityNames = new Set(stockEntities.map((e) => e.entity));
+  const countedAs = (item: string) => {
+    if (stockEntityNames.has(item)) return item;
+    const recipe = productByName.get(item)?.recipeSource ?? "";
+    return stockEntities.some((e) => e.entity === recipe && e.entityType === "recipe") ? recipe : "";
+  };
+  const yesterday = addDays(today, -1);
+  const demand = windowDemand.filter((line) => line.forDate > (countDates.get(countedAs(line.item)) ?? yesterday));
 
   // A reserve entity's own oz size — a product entity converts through that
   // product's own physical size (its amtUnit, e.g. "kegs"/"bottles", is

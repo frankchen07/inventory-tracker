@@ -22,7 +22,7 @@ function oneOff(o: Partial<OneOffOrder>): OneOffOrder {
   return { date: "", customer: "", item: "", quantity: 0, quantityUnit: "", notes: "", channel: "client", active: true, ...o };
 }
 
-// Monday 2026-10-05: popup week is Wed 10-07..Sat 10-10, capture window ends 10-13.
+// Monday 2026-10-05: the window is Wed 10-07 through Tue 10-13.
 const TODAY = "2026-10-05";
 
 const inputs = {
@@ -46,6 +46,7 @@ const inputs = {
     ["cold brew", 1],
     ["vanilla syrup bottle", 5],
   ]),
+  countDates: new Map<string, string>(),
   standing: [
     standing({ customer: "Midwife", item: "nitro keg", quantity: 2, quantityUnit: "kegs", dayOfWeek: "Friday", channel: "popup" }),
     standing({ customer: "Cafe A", item: "cold brew bottle", quantity: 10, dayOfWeek: "Thursday" }),
@@ -54,7 +55,7 @@ const inputs = {
     standing({ customer: "Tri Next", item: "nitro keg", quantity: 1, dayOfWeek: "Thursday", intervalWeeks: 3, anchorDate: "2026-09-23" }),
     standing({ customer: "Blank Anchor", item: "vanilla syrup", quantity: 50, quantityUnit: "oz", intervalWeeks: 4 }),
     standing({ customer: "Inactive", item: "nitro keg", quantity: 9, active: false }),
-    standing({ customer: "Sunday", item: "nitro keg", quantity: 9, dayOfWeek: "Sunday" }),
+    standing({ customer: "Bad Day", item: "nitro keg", quantity: 9, dayOfWeek: "Someday" }),
   ],
   oneOff: [
     oneOff({ date: "2026-10-12", customer: "Event X", item: "cold brew bottle", quantity: 6 }),
@@ -65,9 +66,11 @@ const inputs = {
 
 const plan = buildProductionPlan(inputs, TODAY);
 
-test("window is today through today+8", () => {
-  assert.equal(plan.windowStart, "2026-10-05");
+test("window is this week's Wednesday through next Tuesday", () => {
+  assert.equal(plan.windowStart, "2026-10-07");
   assert.equal(plan.windowEnd, "2026-10-13");
+  const saturday = buildProductionPlan(inputs, "2026-10-10");
+  assert.deepEqual([saturday.windowStart, saturday.windowEnd], ["2026-10-07", "2026-10-13"]);
 });
 
 test("demand: active, in-phase, in-window lines, sorted by date then customer", () => {
@@ -88,11 +91,42 @@ test("demand: active, in-phase, in-window lines, sorted by date then customer", 
   );
 });
 
-test("upcoming: only non-weekly orders due next week and not this week", () => {
+test("upcoming: non-weekly standing orders and one-offs in next week's window", () => {
   assert.deepEqual(
     plan.upcomingDemand.map((l) => [l.forDate, l.customer, l.item, l.quantity, l.oz, l.displayQty, l.displayUnit]),
-    [["2026-10-15", "Tri Next", "nitro keg", 1, 640, 1, "kegs"]],
+    [
+      ["2026-10-15", "Tri Next", "nitro keg", 1, 640, 1, "kegs"],
+      ["2026-10-20", "Too Late", "cold brew bottle", 6, 96, 6, null],
+    ],
   );
+});
+
+test("Sunday through Tuesday orders land at the end of the window", () => {
+  const p = buildProductionPlan(
+    {
+      ...inputs,
+      standing: [
+        standing({ customer: "Sun", item: "nitro keg", quantity: 1, dayOfWeek: "Sunday" }),
+        standing({ customer: "Tue", item: "nitro keg", quantity: 1, dayOfWeek: "Tuesday" }),
+      ],
+      oneOff: [oneOff({ date: "2026-10-13", customer: "Last Day", item: "nitro keg", quantity: 1 })],
+    },
+    TODAY,
+  );
+  assert.deepEqual(
+    p.demand.map((l) => [l.forDate, l.customer]),
+    [["2026-10-11", "Sun"], ["2026-10-13", "Last Day"], ["2026-10-13", "Tue"]],
+  );
+});
+
+test("a fortnightly Tuesday order is phased by the week it's delivered in", () => {
+  // Anchored Tue 2026-09-29, so due Tue 10-13 (two weeks on), not Tue 10-06.
+  const order = standing({ customer: "Catering", item: "nitro keg", quantity: 1, dayOfWeek: "Tuesday", intervalWeeks: 2, anchorDate: "2026-09-29" });
+  const thisWeek = buildProductionPlan({ ...inputs, standing: [order], oneOff: [] }, TODAY);
+  assert.deepEqual(thisWeek.demand.map((l) => l.forDate), ["2026-10-13"]);
+  const lastWeek = buildProductionPlan({ ...inputs, standing: [order], oneOff: [] }, "2026-09-28");
+  assert.deepEqual(lastWeek.demand.map((l) => l.forDate), []);
+  assert.deepEqual(lastWeek.upcomingDemand.map((l) => l.forDate), ["2026-10-13"]);
 });
 
 test("reserve levels: every entity, converted to oz", () => {
@@ -159,6 +193,7 @@ const weekInputs = {
     ["vanilla syrup bottle", 0.3],
     ["chocolate squeeze bottle", 1],
   ]),
+  countDates: new Map<string, string>(),
   standing: [
     standing({ customer: "midwife", item: "vanilla syrup bottle", quantity: 2, channel: "popup" }),
     standing({ customer: "midwife", item: "chocolate squeeze bottle", quantity: 2, channel: "popup" }),
@@ -330,6 +365,51 @@ test("orders the plan can't turn into batches are reported, not dropped", () => 
     { item: "no yield", problem: "has no batch yield in the recipes tab" },
     { item: "no such recipe", problem: "has no batch yield in the recipes tab" },
   ]);
+});
+
+test("orders on or before an item's count date are already in that count", () => {
+  // Counted Thu 11/5 after service: Wed and Thu popup Guatemala is already
+  // gone from the 21 lb, so only Fri and Sat (6 lb) are still to come.
+  const popup = (quantity: number, dayOfWeek: string) =>
+    standing({ customer: "midwife", item: "guatemala roast", quantity, quantityUnit: "lbs", dayOfWeek, channel: "popup" });
+  const plan = buildProductionPlan(
+    {
+      ...weekInputs,
+      latestStock: new Map([...weekInputs.latestStock, ["guatemala roast", 21]]),
+      countDates: new Map([["guatemala roast", "2026-11-05"]]),
+      standing: [popup(2, "Wednesday"), popup(2, "Thursday"), popup(3, "Friday"), popup(3, "Saturday")],
+    },
+    "2026-11-06",
+  );
+  assert.deepEqual(plan.demand.map((l) => l.forDate), ["2026-11-06", "2026-11-07"]);
+  const draw = plan.reserveDraws.find((d) => d.item === "guatemala roast")!;
+  assert.deepEqual([draw.have, draw.need, draw.left], [21, 6, 15]);
+});
+
+test("a stale count still subtracts every order in the window since", () => {
+  const plan = buildProductionPlan(
+    { ...weekInputs, countDates: new Map([["guatemala roast", "2026-09-22"]]) },
+    "2026-11-06",
+  );
+  assert.equal(plan.reserveDraws.find((d) => d.item === "guatemala roast")!.need, 10);
+});
+
+test("orders with no count to check against drop off once their day has passed", () => {
+  const plan = buildProductionPlan(weekInputs, "2026-11-06");
+  // Thermo Fisher's Thursday Chiapas has no reserve; Friday's orders remain.
+  assert.equal(plan.demand.some((l) => l.customer === "thermo fisher"), false);
+  assert.equal(plan.demand.some((l) => l.customer === "slb"), true);
+  const onTheDay = buildProductionPlan(weekInputs, "2026-11-05");
+  assert.equal(onTheDay.demand.some((l) => l.customer === "thermo fisher"), true);
+});
+
+test("a product with no reserve row is checked against its recipe's count", () => {
+  const plan = buildProductionPlan(
+    { ...weekInputs, countDates: new Map([["espresso ccx", "2026-11-06"]]) },
+    "2026-11-06",
+  );
+  // Friday's pouches come out of espresso ccx, counted Friday after service.
+  assert.equal(plan.demand.some((l) => l.item === "espresso ccx pouch"), false);
 });
 
 test("a healthy week reports no sheet problems", () => {

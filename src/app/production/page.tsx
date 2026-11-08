@@ -215,7 +215,9 @@ export default async function ProductionPage() {
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-[28px] font-bold">Production</h1>
-          <p className="mt-1 text-base text-zinc-600">Covers orders through {formatDayLabel(plan.windowEnd)}</p>
+          <p className="mt-1 text-base text-zinc-600">
+            Orders {formatDayLabel(plan.windowStart)}&ndash;{formatDayLabel(plan.windowEnd)}
+          </p>
         </div>
         <Link
           href="/"

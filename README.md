@@ -42,11 +42,11 @@ Seven tabs, each a flat table with a header row (no numeric IDs — everything i
   parsed), link to the raw sheet.
 - **`/scans/upload`** — photograph a filled-in inventory count sheet; OCR drafts the numbers,
   you review and confirm before anything is written back to `inventory`.
-- **`/production`** — this week's plan as four steps: what's due for the Wed–Sat popup/deliveries,
-  what that takes from reserves, what orders still need made Mon/Tue, and how far reserves could be
-  refilled (optional, your call). Standing orders always map onto
-  *this* calendar week's Wed–Sat; one-off orders are picked up from today through 8 days out, so an
-  order early next week shows up in time to brew for it.
+- **`/production`** — this week's plan as four steps: what's due from Wednesday through the
+  following Tuesday (popup, deliveries, catering), what that takes from reserves, what orders still
+  need made Mon/Tue, and how far reserves could be refilled (optional, your call). Counts are taken
+  after service, so an order dated on or before an item's latest count is treated as already
+  reflected in it. Next window's one-offs and non-weekly orders show as a heads-up.
 
 Editing `recipes`/`products`/`standing orders`/`reserve stock` directly in the sheet is expected
 day-to-day — the app never needs a code change for a new product or a renamed recipe, only

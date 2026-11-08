@@ -188,6 +188,8 @@ export async function listDateColumns(
 export interface LatestValues {
   // Latest non-blank value in that sheet row, "" if never counted.
   valueAtRow: (rowIndex: number) => string;
+  // Header date of the column that value came from, null if never counted.
+  dateAtRow: (rowIndex: number) => string | null;
   latestDate: string | null;
 }
 
@@ -204,13 +206,21 @@ export function mergeDateColumns(grid: unknown[][]): LatestValues {
     .sort((a, b) => a.date.localeCompare(b.date));
 
   const values = rows.map(() => "");
-  for (const { i } of cols) {
+  const dates: (string | null)[] = rows.map(() => null);
+  for (const { date, i } of cols) {
     rows.forEach((row, r) => {
       const v = String(row?.[i] ?? "");
-      if (v !== "") values[r] = v;
+      if (v !== "") {
+        values[r] = v;
+        dates[r] = date;
+      }
     });
   }
-  return { valueAtRow: (rowIndex) => values[rowIndex - 2] ?? "", latestDate: cols.at(-1)?.date ?? null };
+  return {
+    valueAtRow: (rowIndex) => values[rowIndex - 2] ?? "",
+    dateAtRow: (rowIndex) => dates[rowIndex - 2] ?? null,
+    latestDate: cols.at(-1)?.date ?? null,
+  };
 }
 
 export async function readLatestValues(sheetName: string, fixedColumnCount: number): Promise<LatestValues> {

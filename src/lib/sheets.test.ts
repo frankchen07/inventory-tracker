@@ -29,6 +29,10 @@ test("mergeDateColumns carries forward by date and looks up by sheet row", () =>
   assert.equal(latest.valueAtRow(4), "4 sleeves");
   assert.equal(latest.valueAtRow(5), "");
   assert.equal(latest.valueAtRow(99), "");
+  assert.equal(latest.dateAtRow(2), "2026-09-15");
+  assert.equal(latest.dateAtRow(4), "2026-09-01");
+  assert.equal(latest.dateAtRow(5), null);
+  assert.equal(latest.dateAtRow(99), null);
 });
 
 test("mergeDateColumns with no date columns", () => {

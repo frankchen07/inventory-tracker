@@ -99,7 +99,7 @@ export interface OneOffOrder {
 }
 
 // A single customer/item demand line for one delivery date within the
-// week's Wed-Sat window, regardless of whether it came from a standing order
+// Wed-Tue window, regardless of whether it came from a standing order
 // (mapped onto a concrete date via its weekday) or a one-off order.
 export interface DemandLine {
   customer: string;
@@ -259,17 +259,17 @@ export interface ProductRequirement {
   recipeSource: string;
 }
 
-// windowStart/windowEnd are a rolling ~9-day capture window starting today
-// (see production.ts), not a fixed calendar-week range — there's no single
-// "the date" this plan is for, since demand is aggregated across the whole
-// window.
+// windowStart/windowEnd are this week's Wednesday through the following
+// Tuesday (see production.ts) — there's no single "the date" this plan is
+// for, since demand is aggregated across the whole window.
 export interface ProductionPlan {
   windowStart: string;
   windowEnd: string;
+  // Window orders not yet reflected in a count (see buildProductionPlan).
   demand: DemandLine[];
-  // Non-weekly standing orders due next calendar week — informational only,
-  // never folded into batches/productRequirements below (see
-  // getUpcomingStandingDemand in production.ts for why).
+  // Next window's non-weekly standing orders and one-offs — informational
+  // only, never folded into batches/productRequirements below (see
+  // getUpcomingDemand in production.ts for why).
   upcomingDemand: DemandLine[];
   batches: BatchRequirement[];
   reserveLevels: ReserveLevel[];
