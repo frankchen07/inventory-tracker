@@ -143,6 +143,60 @@ export interface BatchRequirement {
   recipeOzYieldQty: number;
   batchesNeeded: number;
   surplusQty: number;
+  // batchesNeeded split by why: what this week's orders can't do without,
+  // and what only tops reserves back up to target (optional, Frank's call).
+  // Always sums to batchesNeeded.
+  batchesForOrders: number;
+  batchesForRefill: number;
+  // The one product this recipe fills, for display: its only reserve-tracked
+  // product, else its only product. Null when there's no single answer, or
+  // when the recipe keeps its own bulk reserve (a batch goes there, not into
+  // packages). unit is null for a product with no reserve-stock row.
+  output: { product: string; unit: string | null; ozEach: number } | null;
+}
+
+// What this week's orders take from one reserve, in that reserve's own unit —
+// unit is "" for a product entity, whose name already says what's being
+// counted. An item with no reserve at all still gets a row (have 0), so
+// everything that needs making has a visible reason.
+export interface ReserveDraw {
+  item: string;
+  unit: string;
+  have: number;
+  need: number;
+  left: number;
+  short: number;
+}
+
+// Where one reserve stands once this week's orders are filled, including any
+// leftover from the batches those orders required. Only reserves with a
+// nonzero target. Refilling is counted in `batch` batches when one recipe
+// clearly feeds this reserve; otherwise (batch null) in `units` of the entity.
+export interface RefillLevel {
+  entity: string;
+  amt: number;
+  amtUnit: string;
+  level: number;
+  batch: BatchRequirement | null;
+  units: number;
+  // The recipe a product entity is filled from; "" for a recipe entity.
+  recipeSource: string;
+}
+
+// Whole units of a tracked product that orders require but no batch row can
+// name, because its recipe keeps a bulk reserve or is shared with another
+// tracked product. Without this, filling them would read as optional refill.
+export interface OrderFill {
+  product: string;
+  units: number;
+  recipeSource: string;
+}
+
+// Demand the plan can't turn into something to make, because of how the sheet
+// is filled in. Reported so a broken row can't read as "nothing short".
+export interface SheetProblem {
+  item: string;
+  problem: string;
 }
 
 // "reserve stock" sheet: a running reserve level for a finished/semi-finished
@@ -220,6 +274,10 @@ export interface ProductionPlan {
   batches: BatchRequirement[];
   reserveLevels: ReserveLevel[];
   productRequirements: ProductRequirement[];
+  reserveDraws: ReserveDraw[];
+  refillLevels: RefillLevel[];
+  orderFills: OrderFill[];
+  sheetProblems: SheetProblem[];
 }
 
 // One OCR-read row of a count sheet.

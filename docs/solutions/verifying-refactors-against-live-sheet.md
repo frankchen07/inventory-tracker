@@ -13,10 +13,16 @@ Capture a golden before and after, same day, and diff:
 1. **Data**: a throwaway script (outside the repo, or deleted after) that dumps
    `computeProductionPlan()`, `getInventorySnapshot()` + `computeRestockList()` to JSON. Run with
    `node --env-file=.env.local --import tsx ./script.mts out.json`.
-2. **HTML**: `next dev`, then curl `/`, `/production`, `/scans/upload` with cookie
-   `inventory_auth=$APP_PASSPHRASE` (read from `.env.local`, never echoed), strip `<script>`,
+2. **HTML**: `next dev`, then curl `/`, `/production`, `/scans/upload` with a signed
+   `inventory_auth` cookie: `<expires>.<hmac>`, built like `createSessionToken` in `src/lib/auth.ts`
+   from `AUTH_SECRET` and `APP_PASSPHRASE` (read from `.env.local`, never echoed). Strip `<script>`,
    `<link>`, `<style>`, and diff.
 Expected noise: React `<!-- -->` text-node markers shift when JSX text splits change.
+
+A matching golden proves the math, not the page's instructions. When a page redesign stops reading
+a field, check the instruction that field carried still appears somewhere. Dropping
+`productRequirements` kept every number identical but lost "make N kegs" for a keg short on orders
+whose bulk concentrate covered it, which only a review against the old page caught.
 
 Write paths (`writeCountColumn` via scan confirm / MCP) hit the real sheet — don't exercise them
 without Frank's OK.

@@ -42,8 +42,9 @@ Seven tabs, each a flat table with a header row (no numeric IDs — everything i
   parsed), link to the raw sheet.
 - **`/scans/upload`** — photograph a filled-in inventory count sheet; OCR drafts the numbers,
   you review and confirm before anything is written back to `inventory`.
-- **`/production`** — this week's plan: what's needed for the Wed–Sat popup/deliveries, current
-  reserve levels, and what to brew/roast/make Mon/Tue to cover it. Standing orders always map onto
+- **`/production`** — this week's plan as four steps: what's due for the Wed–Sat popup/deliveries,
+  what that takes from reserves, what orders still need made Mon/Tue, and how far reserves could be
+  refilled (optional, your call). Standing orders always map onto
   *this* calendar week's Wed–Sat; one-off orders are picked up from today through 8 days out, so an
   order early next week shows up in time to brew for it.
 

@@ -19,10 +19,14 @@ import type {
   OneOffOrder,
   DemandLine,
   BatchRequirement,
+  OrderFill,
   ProductionStockEntity,
   ReserveLevel,
   ProductRequirement,
   ProductionPlan,
+  RefillLevel,
+  ReserveDraw,
+  SheetProblem,
 } from "@/lib/types";
 import { normalizeUnit } from "@/lib/unit-conversion";
 import { addDays, mondayOfWeek, parseDate, todayISO } from "@/lib/dates";
@@ -95,6 +99,13 @@ function parseActive(raw: string): boolean {
 
 function byDateThenCustomer(a: DemandLine, b: DemandLine): number {
   return a.forDate.localeCompare(b.forDate) || a.customer.localeCompare(b.customer);
+}
+
+// Summing fractional quantities (0.1 + 0.2 against 0.3 on hand) leaves float
+// dust that would otherwise read as "short" and cost a whole batch.
+function shortfall(need: number, have: number): number {
+  const short = need - have;
+  return short < 1e-9 ? 0 : short;
 }
 
 export async function getRecipes(): Promise<Recipe[]> {
@@ -399,6 +410,7 @@ export function buildProductionPlan(
     }
     demandByProduct.set(line.item, (demandByProduct.get(line.item) ?? 0) + line.quantity);
   }
+  const directOzByRecipe = new Map(rawOzByRecipe);
 
   // Every reserve-tracked entity gets a level (even at/above target) so the
   // "Reserve" section always shows the full picture — a pure on-hand-vs-
@@ -470,11 +482,58 @@ export function buildProductionPlan(
     neededByName.set(entity.entity, Math.max(0, entity.amt * unitOz + rawOz - onHand * unitOz));
   }
 
+  // The part of each recipe's raw need that this week's orders actually
+  // require: direct oz-lines, made-fresh products, and only the *shortfall*
+  // of a tracked product (units it already has on hand are covered, and its
+  // gap back up to target is optional refill, not order demand).
+  const onHandOf = (name: string) => latestStock.get(name) ?? 0;
+  const recipeEntityByName = new Map(
+    stockEntities.filter((e) => e.entityType === "recipe").map((e) => [e.entity, e]),
+  );
+  const trackedProductsOf = (recipe: string) =>
+    (productsByRecipe.get(recipe) ?? []).filter((p) => productEntityNames.has(p.product));
+  const orderOzByRecipe = new Map(directOzByRecipe);
+  const orderFills: OrderFill[] = [];
+  const sheetProblems: SheetProblem[] = [];
+  for (const [productName, demandQty] of demandByProduct) {
+    const product = productByName.get(productName);
+    if (!product) {
+      sheetProblems.push({ item: productName, problem: "isn't in the products tab" });
+      continue;
+    }
+    const isTracked = productEntityNames.has(productName);
+    const qty = isTracked ? shortfall(demandQty, onHandOf(productName)) : demandQty;
+    if (qty > 0 && product.ozRecipeSourceNeeded <= 0) {
+      sheetProblems.push({ item: productName, problem: "has no recipe oz in the products tab" });
+    }
+    if (
+      isTracked &&
+      qty > 0 &&
+      (recipeEntityByName.has(product.recipeSource) || trackedProductsOf(product.recipeSource).length > 1)
+    ) {
+      orderFills.push({ product: productName, units: Math.ceil(qty), recipeSource: product.recipeSource });
+    }
+    orderOzByRecipe.set(
+      product.recipeSource,
+      (orderOzByRecipe.get(product.recipeSource) ?? 0) + qty * product.ozRecipeSourceNeeded,
+    );
+  }
+
+  const orderShortOz = (recipe: string) => {
+    const entity = recipeEntityByName.get(recipe);
+    const haveOz = entity ? onHandOf(recipe) * reserveUnitOz(entity) : 0;
+    return shortfall(orderOzByRecipe.get(recipe) ?? 0, haveOz);
+  };
+
   const batches: BatchRequirement[] = [];
   for (const [recipeName, totalNeededQty] of neededByName) {
     const recipe = recipeByName.get(recipeName);
     if (!recipe || recipe.recipeOzYieldQty <= 0) continue;
     const batchesNeeded = Math.ceil(totalNeededQty / recipe.recipeOzYieldQty);
+    const batchesForOrders = Math.min(batchesNeeded, Math.ceil(orderShortOz(recipeName) / recipe.recipeOzYieldQty));
+    const tracked = trackedProductsOf(recipeName);
+    const candidates = tracked.length > 0 ? tracked : productsByRecipe.get(recipeName) ?? [];
+    const soleProduct = candidates.length === 1 ? candidates[0] : null;
     batches.push({
       recipe: recipeName,
       category: recipe.category,
@@ -482,11 +541,108 @@ export function buildProductionPlan(
       recipeOzYieldQty: recipe.recipeOzYieldQty,
       batchesNeeded,
       surplusQty: batchesNeeded * recipe.recipeOzYieldQty - totalNeededQty,
+      batchesForOrders,
+      batchesForRefill: batchesNeeded - batchesForOrders,
+      output:
+        soleProduct && soleProduct.ozRecipeSourceNeeded > 0 && !recipeEntityByName.has(recipeName)
+          ? {
+              product: soleProduct.product,
+              unit: amtUnitByEntity.get(soleProduct.product) ?? null,
+              ozEach: soleProduct.ozRecipeSourceNeeded,
+            }
+          : null,
     });
   }
   batches.sort(
     (a, b) => a.category.localeCompare(b.category) || a.recipe.localeCompare(b.recipe),
   );
+  const batchByRecipe = new Map(batches.map((b) => [b.recipe, b]));
+  for (const recipeName of orderOzByRecipe.keys()) {
+    if (orderShortOz(recipeName) > 0 && !batchByRecipe.has(recipeName)) {
+      sheetProblems.push({ item: recipeName, problem: "has no batch yield in the recipes tab" });
+    }
+  }
+
+  const toDraw = (item: string, unit: string, have: number, need: number): ReserveDraw => ({
+    item,
+    unit,
+    have,
+    need,
+    left: Math.max(0, have - need),
+    short: shortfall(need, have),
+  });
+  const reserveDraws: ReserveDraw[] = [];
+  for (const entity of stockEntities) {
+    const need =
+      entity.entityType === "product"
+        ? demandByProduct.get(entity.entity) ?? 0
+        : (orderOzByRecipe.get(entity.entity) ?? 0) / reserveUnitOz(entity);
+    if (need > 0) {
+      reserveDraws.push(toDraw(entity.entity, entity.entityType === "product" ? "" : entity.amtUnit, onHandOf(entity.entity), need));
+    }
+  }
+  for (const [recipeName, oz] of directOzByRecipe) {
+    const recipe = recipeByName.get(recipeName);
+    if (!recipe || recipeEntityByName.has(recipeName)) continue;
+    reserveDraws.push(
+      recipe.category === "beans" ? toDraw(recipeName, "lbs", 0, oz / RECIPE_UNIT_OZ.lb) : toDraw(recipeName, "oz", 0, oz),
+    );
+  }
+  for (const [productName, demandQty] of demandByProduct) {
+    const product = productByName.get(productName);
+    if (!product || productEntityNames.has(productName) || recipeEntityByName.has(product.recipeSource)) continue;
+    reserveDraws.push(toDraw(productName, "", 0, demandQty));
+  }
+  reserveDraws.sort((a, b) => Number(a.short > 0) - Number(b.short > 0));
+
+  // What an order batch makes beyond the order shortfall lands in the reserve
+  // it was brewed into, so a level here can sit above max(0, have - need).
+  const orderLeftoverOz = (recipe: string) => {
+    const batch = batchByRecipe.get(recipe);
+    return batch ? batch.batchesForOrders * batch.recipeOzYieldQty - orderShortOz(recipe) : 0;
+  };
+  const refillLevels: RefillLevel[] = [];
+  for (const entity of stockEntities) {
+    if (entity.amt <= 0) continue;
+    const onHand = onHandOf(entity.entity);
+    if (entity.entityType === "recipe") {
+      const unitOz = reserveUnitOz(entity);
+      const need = (orderOzByRecipe.get(entity.entity) ?? 0) / unitOz;
+      const level = Math.max(0, onHand - need) + orderLeftoverOz(entity.entity) / unitOz;
+      const batch = batchByRecipe.get(entity.entity) ?? null;
+      refillLevels.push({
+        entity: entity.entity,
+        amt: entity.amt,
+        amtUnit: entity.amtUnit,
+        level,
+        batch,
+        units: batch ? 0 : Math.ceil(shortfall(entity.amt, level)),
+        recipeSource: "",
+      });
+      continue;
+    }
+    const product = productByName.get(entity.entity);
+    const recipeSource = product?.recipeSource ?? "";
+    // Only a recipe with no bulk reserve and this as its one tracked product
+    // has batches that clearly belong to this row; otherwise those batches
+    // are shared, so the honest count is units of this product.
+    const batch =
+      !recipeEntityByName.has(recipeSource) && trackedProductsOf(recipeSource).length === 1
+        ? batchByRecipe.get(recipeSource) ?? null
+        : null;
+    const leftover = batch && product?.ozRecipeSourceNeeded ? orderLeftoverOz(recipeSource) / product.ozRecipeSourceNeeded : 0;
+    const level = Math.max(0, onHand - (demandByProduct.get(entity.entity) ?? 0)) + leftover;
+    refillLevels.push({
+      entity: entity.entity,
+      amt: entity.amt,
+      amtUnit: entity.amtUnit,
+      level,
+      batch,
+      units: batch ? 0 : Math.ceil(shortfall(entity.amt, level)),
+      recipeSource,
+    });
+  }
+  refillLevels.sort((a, b) => a.level / a.amt - b.level / b.amt);
 
   return {
     windowStart,
@@ -496,5 +652,9 @@ export function buildProductionPlan(
     batches,
     reserveLevels,
     productRequirements,
+    reserveDraws,
+    refillLevels,
+    orderFills,
+    sheetProblems,
   };
 }
