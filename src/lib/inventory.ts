@@ -1,11 +1,7 @@
 import {
   CATALOG_SHEET,
   CATALOG_HEADERS,
-  SCAN_PHOTOS_SHEET,
-  SCAN_PHOTOS_HEADERS,
   readRows,
-  appendRow,
-  ensureSheetWithHeaders,
   getOrCreateDateColumn,
   readLatestValues,
   writeCells,
@@ -112,9 +108,4 @@ export async function writeCountColumn(
     return value === undefined ? [] : [{ rowIndex: c.rowIndex, value }];
   });
   await writeCells(colIndex, cells);
-}
-
-export async function recordScanPhoto(date: string, photoUrl: string): Promise<void> {
-  await ensureSheetWithHeaders(SCAN_PHOTOS_SHEET, SCAN_PHOTOS_HEADERS);
-  await appendRow(SCAN_PHOTOS_SHEET, SCAN_PHOTOS_HEADERS, { date, photoUrl });
 }

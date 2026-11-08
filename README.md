@@ -11,8 +11,6 @@ Copy `.env.example` to `.env.local` (not committed) and fill in:
 - `GOOGLE_SERVICE_ACCOUNT_EMAIL` / `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY` — a Google service
   account with edit access to that sheet.
 - `APP_PASSPHRASE` — single shared passphrase gating the whole app (see `/login`).
-- `BLOB_READ_WRITE_TOKEN` — Vercel Blob, used to store uploaded scan photos.
-- `OPENROUTER_API_KEY` — used to OCR a photographed count sheet on upload.
 - `MCP_ACCESS_TOKEN` — bearer token gating `/api/mcp` (see below).
 
 Then:
@@ -24,11 +22,10 @@ npm test   # unit tests for unit parsing and production math
 
 ## The sheet
 
-Seven tabs, each a flat table with a header row (no numeric IDs — everything is keyed by name):
+Six tabs, each a flat table with a header row (no numeric IDs — everything is keyed by name):
 
 - **inventory** — the purchased-goods catalog (item, category, supplier, unit conversion,
   threshold), plus one date column per physical count, oldest to newest.
-- **scan photos** — links a count date back to the photo it was OCR'd from.
 - **recipes** — batch processes (brewing, roasting, etc.) and their oz yield per batch.
 - **products** — the countable units you actually order/reserve (a bottle, a keg, a bag size),
   each pointing at the one recipe it's filled from.
@@ -40,8 +37,6 @@ Seven tabs, each a flat table with a header row (no numeric IDs — everything i
 
 - **`/`** — inventory dashboard: what's low stock, what needs review (a count that couldn't be
   parsed), link to the raw sheet.
-- **`/scans/upload`** — photograph a filled-in inventory count sheet; OCR drafts the numbers,
-  you review and confirm before anything is written back to `inventory`.
 - **`/production`** — this week's plan as four steps: what's due from Wednesday through the
   following Tuesday (popup, deliveries, catering), what that takes from reserves, what orders still
   need made Mon/Tue, and how far reserves could be refilled (optional, your call). Counts are taken
@@ -60,9 +55,9 @@ including voice dictation — write inventory counts straight to the `inventory`
 going through Anthropic's separate Autosheet feature or its credit limits.
 
 It exposes one tool, `record_inventory_count(date?, counts: {item, count}[])`, which matches each
-`item` against the live catalog (case-insensitive) and calls the same `writeCountColumn` used by
-the photo-scan-confirm flow — so counted items land in a dated column and everything else carries
-forward, same semantics either way. Unrecognized item names are reported back instead of guessed.
+`item` against the live catalog (case-insensitive) and calls `writeCountColumn`, so counted items
+land in a dated column and everything else carries forward. Unrecognized item names are reported
+back instead of guessed.
 
 The route enforces its own auth (a bearer token checked against `MCP_ACCESS_TOKEN`) rather than
 the app's cookie-based passphrase gate, since an MCP client can't hold a browser cookie —

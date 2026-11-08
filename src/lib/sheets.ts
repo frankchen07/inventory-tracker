@@ -5,15 +5,10 @@ const SPREADSHEET_ID = process.env.GOOGLE_SHEETS_SPREADSHEET_ID!;
 // "inventory" is the single source of truth: columns A-E are the fixed
 // catalog (item, category, supplier, unit conversion, threshold), and every
 // column from F onward is a date-headered count column, oldest to newest
-// left to right. There is no separate scan/history tab — a confirmed count
-// *is* a new column here.
+// left to right. There is no separate history tab — a recorded count *is* a
+// new column here.
 export const CATALOG_SHEET = "inventory";
 export const CATALOG_HEADERS = ["item", "category", "supplier", "unitConversion", "threshold"] as const;
-
-// Lightweight receipt linking a count date to its source photo — not an
-// audit log, just enough to go check the original photo if a number looks off.
-export const SCAN_PHOTOS_SHEET = "scan photos";
-export const SCAN_PHOTOS_HEADERS = ["date", "photoUrl"] as const;
 
 // Production planning tabs. Frank creates these by hand with the header row
 // already in place. readRows maps columns by position, not by name, so each
@@ -101,20 +96,6 @@ export async function readRows<H extends readonly string[]>(
   return parseRows(res.data.values ?? [], headers);
 }
 
-export async function appendRow<H extends readonly string[]>(
-  sheetName: string,
-  headers: H,
-  record: Record<H[number], string>,
-): Promise<void> {
-  const values = headers.map((h) => record[h as H[number]] ?? "");
-  await getClient().spreadsheets.values.append({
-    spreadsheetId: SPREADSHEET_ID,
-    range: `${sheetName}!A:A`,
-    valueInputOption: "USER_ENTERED",
-    requestBody: { values: [values] },
-  });
-}
-
 // Writes a whole row at a known position rather than via values.append, whose
 // table detection decides the target row itself.
 export async function writeRow<H extends readonly string[]>(
@@ -129,35 +110,6 @@ export async function writeRow<H extends readonly string[]>(
     range: `${sheetName}!A${rowIndex}:${columnLetter(headers.length - 1)}${rowIndex}`,
     valueInputOption: "USER_ENTERED",
     requestBody: { values: [values] },
-  });
-}
-
-export async function ensureSheetWithHeaders<H extends readonly string[]>(
-  sheetName: string,
-  headers: H,
-): Promise<void> {
-  const sheets = getClient();
-  const spreadsheet = await sheets.spreadsheets.get({ spreadsheetId: SPREADSHEET_ID });
-  const exists = spreadsheet.data.sheets?.some((s) => s.properties?.title === sheetName);
-
-  if (!exists) {
-    await sheets.spreadsheets.batchUpdate({
-      spreadsheetId: SPREADSHEET_ID,
-      requestBody: { requests: [{ addSheet: { properties: { title: sheetName } } }] },
-    });
-  }
-
-  const existingHeaderRow = await sheets.spreadsheets.values.get({
-    spreadsheetId: SPREADSHEET_ID,
-    range: `${sheetName}!A1:${columnLetter(headers.length - 1)}1`,
-  });
-  if (existingHeaderRow.data.values?.length) return;
-
-  await sheets.spreadsheets.values.update({
-    spreadsheetId: SPREADSHEET_ID,
-    range: `${sheetName}!A1`,
-    valueInputOption: "USER_ENTERED",
-    requestBody: { values: [[...headers]] },
   });
 }
 

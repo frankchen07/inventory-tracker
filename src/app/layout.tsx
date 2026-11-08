@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Roastery Inventory",
-  description: "OCR-driven inventory tracking for the roastery.",
+  description: "Inventory and production tracking for the roastery.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

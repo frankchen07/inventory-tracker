@@ -279,21 +279,3 @@ export interface ProductionPlan {
   orderFills: OrderFill[];
   sheetProblems: SheetProblem[];
 }
-
-// One OCR-read row of a count sheet.
-export interface ScanDraftLineItem {
-  item: string;
-  reportedQuantityText: string;
-  confidence: number;
-  ambiguous: boolean;
-  notes: string | null;
-}
-
-// In-progress OCR result, stored as a Blob JSON object between upload and
-// confirm — never written to the "inventory" sheet until confirmed.
-export interface ScanDraft {
-  id: string;
-  scanDate: string;
-  photoUrl: string;
-  lineItems: ScanDraftLineItem[];
-}

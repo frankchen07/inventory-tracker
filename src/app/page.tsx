@@ -32,9 +32,6 @@ export default async function DashboardPage() {
       </div>
 
       <div className="mt-5 flex flex-wrap gap-2">
-        <Link href="/scans/upload" className={`${BUTTON} bg-zinc-900 text-white hover:bg-zinc-700`}>
-          Scan inventory
-        </Link>
         <a
           href={sheetUrl}
           target="_blank"
