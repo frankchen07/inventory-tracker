@@ -2,6 +2,9 @@
 
 **Date**: 2026-10-22
 
+**Status**: Historical. The OCR flow was removed in 6352962; `vision-ocr.ts` no longer exists.
+The `needsReview` bucket in `computeRestockList()` remains and still applies to voice counts.
+
 ## The problem
 Some count-sheet entries are a bare number ("6", "12") with no unit. The model read the digit
 at confidence 80–85 and left `ambiguous: false`, even though its notes said "no unit given."
