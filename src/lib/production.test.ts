@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildProductionPlan } from "@/lib/production";
+import { buildProductionPlan, findOrderItem, orderUnitProblem } from "@/lib/production";
 import type { OneOffOrder, StandingOrder } from "@/lib/types";
 
 function standing(o: Partial<StandingOrder>): StandingOrder {
@@ -461,4 +461,27 @@ test("two tracked products sharing an unreserved recipe refill in units", () => 
   assert.deepEqual([bottle.batch, bottle.units], [null, 2]);
   assert.deepEqual([jug.batch, jug.units], [null, 1]);
   assert.deepEqual(plan.orderFills, [{ product: "vanilla syrup bottle", units: 2, recipeSource: "vanilla syrup" }]);
+});
+
+test("findOrderItem returns the exact product or recipe name, case-insensitively", () => {
+  const products = [{ product: "nitro keg", recipeSource: "cold brew", ozRecipeSourceNeeded: 640, unitOz: 640 }];
+  const recipes = [{ recipe: "cold brew", category: "concentrate", recipeOzYieldQty: 1000 }];
+  assert.deepEqual(findOrderItem(products, recipes, " Nitro Keg "), { name: "nitro keg", kind: "product" });
+  assert.deepEqual(findOrderItem(products, recipes, "COLD BREW"), { name: "cold brew", kind: "recipe" });
+  assert.equal(findOrderItem(products, recipes, "nitro kegs"), undefined);
+  // The plan keys on the raw sheet text, so stray spaces must survive.
+  const spaced = [{ ...products[0], product: "nitro keg " }];
+  assert.deepEqual(findOrderItem(spaced, recipes, "nitro keg"), { name: "nitro keg ", kind: "product" });
+});
+
+test("orderUnitProblem rejects units the plan would drop or misread", () => {
+  assert.equal(orderUnitProblem("product", ""), null);
+  assert.equal(orderUnitProblem("product", "kegs"), null);
+  assert.notEqual(orderUnitProblem("product", "oz"), null);
+  assert.notEqual(orderUnitProblem("product", "lbs"), null);
+  assert.equal(orderUnitProblem("recipe", "lbs"), null);
+  assert.equal(orderUnitProblem("recipe", "Gallons"), null);
+  assert.equal(orderUnitProblem("recipe", "oz"), null);
+  assert.notEqual(orderUnitProblem("recipe", ""), null);
+  assert.notEqual(orderUnitProblem("recipe", "quarts"), null);
 });

@@ -11,6 +11,7 @@ import {
   RESERVE_STOCK_HEADERS,
   readRows,
   readLatestValues,
+  writeRow,
 } from "@/lib/sheets";
 import type {
   Recipe,
@@ -210,6 +211,41 @@ export async function getOneOffOrders(): Promise<OneOffOrder[]> {
     channel: parseChannel(r.channel),
     active: parseActive(r.active),
   }));
+}
+
+// The plan matches order items to products/recipes by exact name, so an
+// order must be written with the sheet's own spelling or it silently drops.
+export function findOrderItem(
+  products: Product[],
+  recipes: Recipe[],
+  name: string,
+): { name: string; kind: "product" | "recipe" } | undefined {
+  const wanted = name.trim().toLowerCase();
+  const product = products.find((p) => p.product.trim().toLowerCase() === wanted);
+  if (product) return { name: product.product, kind: "product" };
+  const recipe = recipes.find((r) => r.recipe.trim().toLowerCase() === wanted);
+  if (recipe) return { name: recipe.recipe, kind: "recipe" };
+  return undefined;
+}
+
+// resolveQuantity() reads a recipe order's unit through RECIPE_UNIT_OZ and a
+// product order's as a plain count — so a recipe with no oz-convertible unit
+// adds 0 oz, and a product written in oz/lbs is misread. Reject both up front.
+export function orderUnitProblem(kind: "product" | "recipe", rawUnit: string): string | null {
+  const unit = normalizeUnit(rawUnit.trim().toLowerCase());
+  const bulkUnits = Object.keys(RECIPE_UNIT_OZ).join(", ");
+  if (kind === "recipe") {
+    return unit in RECIPE_UNIT_OZ ? null : `A recipe order needs a bulk unit (${bulkUnits}), got "${rawUnit}".`;
+  }
+  return unit in RECIPE_UNIT_OZ ? `A product order is a plain count — leave the unit blank, not "${rawUnit}".` : null;
+}
+
+// New orders go one row past the current last order, like addCatalogItem.
+export async function addOneOffOrder(record: Record<(typeof ORDERS_HEADERS)[number], string>): Promise<number> {
+  const rows = await readRows(ORDERS_SHEET, ORDERS_HEADERS);
+  const rowIndex = Math.max(1, ...rows.map((r) => r._rowIndex)) + 1;
+  await writeRow(ORDERS_SHEET, ORDERS_HEADERS, rowIndex, record);
+  return rowIndex;
 }
 
 export async function getProductionStockEntities(): Promise<ProductionStockEntity[]> {

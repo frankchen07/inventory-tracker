@@ -15,6 +15,11 @@ export function addDays(date: string, days: number): string {
   return isoDate(d);
 }
 
+// Rounded, since a span crossing a DST change is an hour off a whole day.
+export function daysBetween(from: string, to: string): number {
+  return Math.round((parseDate(to).getTime() - parseDate(from).getTime()) / 86_400_000);
+}
+
 // The server runs in UTC; "today" is the shop's calendar day.
 const SHOP_DATE_FORMAT = new Intl.DateTimeFormat("en-CA", {
   timeZone: "America/Los_Angeles",

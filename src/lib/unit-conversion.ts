@@ -85,6 +85,18 @@ export function parseThresholdQuantity(text: string, levels: UnitLevel[]): numbe
   return parseReportedQuantity(text.split(/\s+or\s+/i)[0], levels);
 }
 
+// Voice counts can be mis-heard ("1.5" as "15", "thirteen" as "thirty"), and
+// the result still parses fine. A 3x swing either way from the last count is
+// worth reading back. Unparseable or zero counts have nothing to compare to,
+// and a drop to zero is just running out.
+export function isSuspiciousChange(previous: string, recorded: string, levels: UnitLevel[]): boolean {
+  const before = parseReportedQuantity(previous, levels);
+  const after = parseReportedQuantity(recorded, levels);
+  if (before === null || after === null || before === 0 || after === 0) return false;
+  const ratio = after / before;
+  return ratio >= 3 || ratio <= 1 / 3;
+}
+
 export type ThresholdCheck = { ok: true } | { ok: false; reason: string };
 
 // Stricter than parseReportedQuantity on purpose: each part must be exactly

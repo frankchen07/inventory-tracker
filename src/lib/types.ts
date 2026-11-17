@@ -25,6 +25,12 @@ export interface NeedsReviewItem {
   countText: string;
 }
 
+export interface StaleCountItem {
+  item: string;
+  lastCounted: string;
+  daysAgo: number;
+}
+
 // "recipes" sheet: a batch process (brewing, roasting) and what it yields.
 // Everything is oz — no per-recipe unit needed.
 export interface Recipe {

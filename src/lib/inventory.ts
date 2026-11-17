@@ -8,7 +8,8 @@ import {
   writeRow,
 } from "@/lib/sheets";
 import { parseConversion, parseReportedQuantity, parseThresholdQuantity } from "@/lib/unit-conversion";
-import type { CatalogItem, NeedsReviewItem, RestockItem } from "@/lib/types";
+import { daysBetween } from "@/lib/dates";
+import type { CatalogItem, NeedsReviewItem, RestockItem, StaleCountItem } from "@/lib/types";
 
 export async function getCatalog(): Promise<CatalogItem[]> {
   const rows = await readRows(CATALOG_SHEET, CATALOG_HEADERS);
@@ -46,6 +47,8 @@ export interface InventorySnapshot {
   catalog: CatalogItem[];
   // Latest raw display text per item (e.g. "1.75 boxes"), "" if never counted.
   counts: Map<string, string>;
+  // Date of the column each item's count came from, null if never counted.
+  countDates: Map<string, string | null>;
   latestDate: string | null;
 }
 
@@ -55,7 +58,28 @@ export async function getInventorySnapshot(): Promise<InventorySnapshot> {
     readLatestValues(CATALOG_SHEET, CATALOG_HEADERS.length),
   ]);
   const counts = new Map(catalog.map((c) => [c.item, latest.valueAtRow(c.rowIndex)]));
-  return { catalog, counts, latestDate: latest.latestDate };
+  const countDates = new Map(catalog.map((c) => [c.item, latest.dateAtRow(c.rowIndex)]));
+  return { catalog, counts, countDates, latestDate: latest.latestDate };
+}
+
+export const STALE_AFTER_DAYS = 7;
+
+// Counts carry forward, so an item skipped for weeks still shows its old
+// number as if current — this is what surfaces it. Never-counted items stay
+// out, same as in computeRestockList.
+export function computeStaleCounts(
+  catalog: CatalogItem[],
+  countDates: Map<string, string | null>,
+  today: string,
+): StaleCountItem[] {
+  return catalog
+    .flatMap((c) => {
+      const lastCounted = countDates.get(c.item);
+      if (!lastCounted) return [];
+      const daysAgo = daysBetween(lastCounted, today);
+      return daysAgo >= STALE_AFTER_DAYS ? [{ item: c.item, lastCounted, daysAgo }] : [];
+    })
+    .sort((a, b) => b.daysAgo - a.daysAgo);
 }
 
 export interface RestockResult {

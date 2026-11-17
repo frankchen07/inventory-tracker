@@ -10,7 +10,8 @@ import {
   writeCountColumn,
   writeThreshold,
 } from "@/lib/inventory";
-import { checkThreshold, parseConversion, parseReportedQuantity } from "@/lib/unit-conversion";
+import { addOneOffOrder, findOrderItem, getProducts, getRecipes, orderUnitProblem } from "@/lib/production";
+import { checkThreshold, isSuspiciousChange, parseConversion, parseReportedQuantity } from "@/lib/unit-conversion";
 
 function result(payload: object, isError = false) {
   return { content: [{ type: "text" as const, text: JSON.stringify(payload) }], isError };
@@ -23,7 +24,7 @@ const mcpHandler = createMcpHandler(
       {
         title: "Record inventory count",
         description:
-          "Record physical counts for one or more inventory items, writing directly to the real 'inventory' Google Sheet. Only include items that were actually counted this time — omit anything unchanged, it will carry forward automatically. Translate whatever the user says into the item's packLevels units (see list_inventory_items), e.g. 'half a case' → '0.5 box'; if the unit is ambiguous, ask. Anything returned in needsUnit was saved but can't be converted — ask the user which unit they meant and record it again.",
+          "Record physical counts for one or more inventory items, writing directly to the real 'inventory' Google Sheet. Only include items that were actually counted this time — omit anything unchanged, it will carry forward automatically. Translate whatever the user says into the item's packLevels units (see list_inventory_items), e.g. 'half a case' → '0.5 box'; if the unit is ambiguous, ask. Anything returned in needsUnit was saved but can't be converted — ask the user which unit they meant and record it again. Anything in checkThese was saved but is 3x or more off the previous count — read previous vs. recorded back to the user and re-record if it was mis-heard.",
         inputSchema: z.object({
           date: z
             .string()
@@ -41,12 +42,13 @@ const mcpHandler = createMcpHandler(
         }),
       },
       async ({ date, counts }) => {
-        const catalog = await getCatalog();
+        const { catalog, counts: previousCounts } = await getInventorySnapshot();
 
         const valuesByItem = new Map<string, string>();
         const written: string[] = [];
         const unrecognized: string[] = [];
         const needsUnit: { item: string; count: string; units: string[] }[] = [];
+        const checkThese: { item: string; previous: string; recorded: string }[] = [];
 
         for (const { item, count } of counts) {
           const match = findCatalogItem(catalog, item);
@@ -60,6 +62,10 @@ const mcpHandler = createMcpHandler(
           if (count.trim() !== "" && parseReportedQuantity(count, levels) === null) {
             needsUnit.push({ item: match.item, count, units: levels.map((l) => l.unit) });
           }
+          const previous = previousCounts.get(match.item) ?? "";
+          if (isSuspiciousChange(previous, count, levels)) {
+            checkThese.push({ item: match.item, previous, recorded: count });
+          }
         }
 
         const targetDate = date ?? todayISO();
@@ -72,6 +78,7 @@ const mcpHandler = createMcpHandler(
           written,
           unrecognized,
           ...(needsUnit.length > 0 && { needsUnit }),
+          ...(checkThese.length > 0 && { checkThese }),
           ...(unrecognized.length > 0 && {
             hint: "Check list_inventory_items for a differently-worded match; only use add_inventory_item if the item is genuinely new.",
           }),
@@ -172,6 +179,58 @@ const mcpHandler = createMcpHandler(
         };
         const row = await addCatalogItem(catalog, record);
         return result({ added: record, row, parsedPackLevels: levels });
+      },
+    );
+
+    server.registerTool(
+      "add_order",
+      {
+        title: "Add one-off order",
+        description:
+          "Add a dated one-off order (catering, event, extra delivery) to the 'a la carte orders' sheet so it shows up in the production plan. Not for recurring orders — those live in the standing orders tab. Read the date, customer, item, and quantity back to the user before calling. The item must match a product or recipe name (case doesn't matter, the sheet's spelling is what gets saved); an unknown item is rejected with the valid names. For a product (e.g. a keg or bottle) quantity is a plain count and quantityUnit must be blank; for a recipe drawn in bulk quantityUnit is required: oz, lbs, or gallons.",
+        inputSchema: z.object({
+          date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).describe("Date the order goes out, YYYY-MM-DD"),
+          customer: z.string().min(1).describe("Who it's for, e.g. 'stanford catering'"),
+          item: z.string().min(1).describe("Product or recipe name, e.g. 'nitro keg'"),
+          quantity: z.number().positive().describe("How many, e.g. 2"),
+          quantityUnit: z.string().optional().describe("Blank for a product count; required for a recipe: 'oz', 'lbs', or 'gallons'"),
+          channel: z.enum(["client", "popup"]).optional().describe("'popup' for Boast's own popup, otherwise 'client' (default)"),
+          notes: z.string().optional(),
+        }),
+      },
+      async ({ date, customer, item, quantity, quantityUnit, channel, notes }) => {
+        const [products, recipes] = await Promise.all([getProducts(), getRecipes()]);
+        const match = findOrderItem(products, recipes, item);
+        if (!match) {
+          return result(
+            {
+              error: `No product or recipe named "${item}".`,
+              products: products.map((p) => p.product),
+              recipes: recipes.map((r) => r.recipe),
+            },
+            true,
+          );
+        }
+        const unitProblem = orderUnitProblem(match.kind, quantityUnit ?? "");
+        if (unitProblem) return result({ error: unitProblem }, true);
+
+        const record = {
+          date,
+          customer: customer.trim(),
+          item: match.name,
+          quantity: String(quantity),
+          quantityUnit: quantityUnit?.trim() ?? "",
+          channel: channel ?? "client",
+          active: "TRUE",
+          notes: notes?.trim() ?? "",
+        };
+        const row = await addOneOffOrder(record);
+        return result({
+          added: record,
+          kind: match.kind,
+          row,
+          ...(date < todayISO() && { warning: "This date is in the past, so it won't show up in the production plan." }),
+        });
       },
     );
   },

@@ -36,7 +36,7 @@ Six tabs, each a flat table with a header row (no numeric IDs — everything is 
 ## Using it
 
 - **`/`** — inventory dashboard: what's low stock, what needs review (a count that couldn't be
-  parsed), link to the raw sheet.
+  parsed), what hasn't been counted in 7+ days, link to the raw sheet.
 - **`/production`** — this week's plan as four steps: what's due from Wednesday through the
   following Tuesday (popup, deliveries, catering), what that takes from reserves, what orders still
   need made Mon/Tue, and how far reserves could be refilled (optional, your call). Counts are taken
@@ -54,10 +54,13 @@ self-consistent data across the tabs.
 including voice dictation — write inventory counts straight to the `inventory` sheet, without
 going through Anthropic's separate Autosheet feature or its credit limits.
 
-It exposes one tool, `record_inventory_count(date?, counts: {item, count}[])`, which matches each
-`item` against the live catalog (case-insensitive) and calls `writeCountColumn`, so counted items
-land in a dated column and everything else carries forward. Unrecognized item names are reported
-back instead of guessed.
+Its main tool, `record_inventory_count(date?, counts: {item, count}[])`, matches each `item`
+against the live catalog (case-insensitive) and calls `writeCountColumn`, so counted items land in
+a dated column and everything else carries forward. Unrecognized item names are reported back
+instead of guessed, and a count 3x or more off the previous one comes back in `checkThese` for
+Claude to read back. The others: `list_inventory_items`, `update_item_threshold`,
+`add_inventory_item`, and `add_order` (a dated one-off order into `a la carte orders`, with the
+item matched to an exact product or recipe name).
 
 The route enforces its own auth (a bearer token checked against `MCP_ACCESS_TOKEN`) rather than
 the app's cookie-based passphrase gate, since an MCP client can't hold a browser cookie —

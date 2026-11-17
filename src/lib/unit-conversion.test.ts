@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { checkThreshold, normalizeUnit, parseConversion, parseReportedQuantity, parseThresholdQuantity } from "@/lib/unit-conversion";
+import { checkThreshold, isSuspiciousChange, normalizeUnit, parseConversion, parseReportedQuantity, parseThresholdQuantity } from "@/lib/unit-conversion";
 
 test("normalizeUnit singularizes", () => {
   assert.equal(normalizeUnit("Boxes"), "box");
@@ -79,4 +79,17 @@ test("checkThreshold rejects what wouldn't convert, naming the valid units", () 
   assert.equal(checkThreshold("1 box or 12 sleeves", cups).ok, false);
   assert.equal(checkThreshold("", cups).ok, false);
   assert.equal(checkThreshold("1 box", "").ok, false);
+});
+
+test("isSuspiciousChange flags a 3x jump or drop from the previous count", () => {
+  const cups = parseConversion("1 box has 12 sleeves with 50 cups per sleeve");
+  assert.equal(isSuspiciousChange("1.5 boxes", "15 boxes", cups), true);
+  assert.equal(isSuspiciousChange("2 boxes", "6 sleeves", cups), true);
+  assert.equal(isSuspiciousChange("2 boxes", "1 box and 6 sleeves", cups), false);
+  assert.equal(isSuspiciousChange("2 boxes", "5 boxes", cups), false);
+  assert.equal(isSuspiciousChange("", "15 boxes", cups), false);
+  assert.equal(isSuspiciousChange("0 boxes", "15 boxes", cups), false);
+  assert.equal(isSuspiciousChange("2 boxes", "6", cups), false);
+  // Running out is routine, not a likely mis-hear.
+  assert.equal(isSuspiciousChange("2 boxes", "0 boxes", cups), false);
 });

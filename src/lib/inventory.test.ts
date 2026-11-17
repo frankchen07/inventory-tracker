@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { computeRestockList, findCatalogItem } from "@/lib/inventory";
+import { computeRestockList, computeStaleCounts, findCatalogItem } from "@/lib/inventory";
 import type { CatalogItem } from "@/lib/types";
 
 const item = (name: string, rowIndex: number): CatalogItem => ({
@@ -35,4 +35,23 @@ test("computeRestockList converts thresholds like counts, legacy 'or' cells by t
   const { lowStock, needsReview } = computeRestockList(catalog, counts);
   assert.deepEqual(lowStock.map((r) => r.item), ["8 oz cup", "napkins"]);
   assert.deepEqual(needsReview.map((r) => r.item), ["lids"]);
+});
+
+test("computeStaleCounts lists items last counted 7+ days ago, oldest first, skipping never-counted", () => {
+  const catalog = [item("oat milk", 2), item("lids", 3), item("napkins", 4), item("straws", 5), item("new thing", 6)];
+  const countDates = new Map<string, string | null>([
+    ["oat milk", "2026-11-12"],
+    ["lids", "2026-11-06"],
+    ["napkins", "2026-10-20"],
+    ["straws", "2026-11-07"],
+    ["new thing", null],
+  ]);
+  const stale = computeStaleCounts(catalog, countDates, "2026-11-13");
+  assert.deepEqual(
+    stale.map((s) => [s.item, s.lastCounted, s.daysAgo]),
+    [
+      ["napkins", "2026-10-20", 24],
+      ["lids", "2026-11-06", 7],
+    ],
+  );
 });
