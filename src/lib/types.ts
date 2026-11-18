@@ -21,7 +21,7 @@ export interface PurchaseRow {
   cost: number | null;
 }
 
-// "buy list" tab row: an eyeballed item someone flagged to buy.
+// "a la buy list" tab row: an eyeballed item someone flagged to buy.
 export interface BuyListRow {
   item: string;
   added: string;

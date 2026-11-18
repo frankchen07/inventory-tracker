@@ -38,7 +38,7 @@ Two more tabs track buying. They're separate tabs because every column after `th
 
 - **purchases** — `date | store | item | quantity | cost | notes`, one row per item bought. `item`
   can be a catalog item or a one-off; `cost` is the line total off the receipt.
-- **buy list** — `item | added | done`, things someone flagged to buy (catalog items or one-offs);
+- **a la buy list** — `item | added | done`, things someone flagged to buy (catalog items or one-offs);
   `done` turns TRUE when a purchase of that item is logged.
 
 Not every item gets counted. `threshold` on `inventory` is the running-low line: an item shows on

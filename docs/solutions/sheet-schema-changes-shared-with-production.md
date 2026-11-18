@@ -18,7 +18,7 @@ branch shipped:
   existing date header.
 
 ## The solution / decision
-Make sheet schema changes additive: new tabs (`purchases`, `buy list`), which `main` never reads.
+Make sheet schema changes additive: new tabs (`purchases`, `a la buy list`), which `main` never reads.
 An `a items` tab (`item | unitCost`) was used the same way, then dropped on 2026-11-17 when frank
 chose to work off `inventory` alone; `threshold` stays the running-low line, so no column moved. Snapshot `getInventorySnapshot()` to JSON
 before and after any live sheet write, and `cmp` the two.
