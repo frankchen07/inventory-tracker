@@ -42,7 +42,9 @@ Two more tabs track buying. They're separate tabs because every column after `th
   `done` turns TRUE when a purchase of that item is logged.
 
 Not every item gets counted. `threshold` on `inventory` is the running-low line: an item shows on
-the buy list once its latest count, plus purchases logged on or after that count's day, is under it.
+the buy list once its latest count is under it, until the next count. Purchases logged on or after
+that count's day show next to it as "bought Nov 18 (1 box)" so nobody buys it twice; they don't
+change the count, since the next count picks them up.
 
 ## Using it
 

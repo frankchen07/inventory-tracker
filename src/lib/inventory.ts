@@ -128,9 +128,11 @@ export async function writeCountColumn(
 
 const sameItem = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 
-// threshold is the running-low line: an item shows when its last count plus
-// anything bought on or after that count's day is under it. Items with no
-// count or no threshold just don't show, since not everything gets counted.
+// threshold is the running-low line: an item shows when its last count is
+// under it, until the next count. Purchases dated on or after that count's day
+// are listed with it so nobody buys it twice; they don't change the count,
+// since the next count picks them up. Items with no count or no threshold
+// just don't show, since not everything gets counted.
 export function computeBuyList(
   catalog: CatalogItem[],
   counts: Map<string, string>,
@@ -155,15 +157,11 @@ export function computeBuyList(
       list.needsReview.push({ item: c.item, problem: `can't read the threshold "${c.threshold}"` });
       continue;
     }
-    const since = purchases.filter((p) => sameItem(p.item, c.item) && p.date >= countDate);
-    const bought = since.map((p) => parseReportedQuantity(p.quantity, levels));
-    if (bought.includes(null)) {
-      list.needsReview.push({ item: c.item, problem: "can't read a purchase quantity since the last count" });
-      continue;
-    }
-    const onHand = counted + (bought as number[]).reduce((a, b) => a + b, 0);
-    if (onHand < threshold) {
-      list.low.push({ item: c.item, supplier: c.supplier, countText, countDate, boughtSince: since.map((p) => p.quantity.trim()) });
+    if (counted < threshold) {
+      const boughtSince = purchases
+        .filter((p) => sameItem(p.item, c.item) && p.date >= countDate)
+        .map((p) => ({ date: p.date, quantity: p.quantity.trim() }));
+      list.low.push({ item: c.item, supplier: c.supplier, countText, countDate, boughtSince });
     }
   }
 

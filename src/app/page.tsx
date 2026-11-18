@@ -23,7 +23,7 @@ export default async function DashboardPage() {
       item: l.item,
       supplier: l.supplier,
       main: `${l.countText} left`,
-      note: shortDate(l.countDate) + (l.boughtSince.length > 0 ? `, bought since: ${l.boughtSince.join(", ")}` : ""),
+      note: [shortDate(l.countDate), ...l.boughtSince.map((b) => `bought ${shortDate(b.date)} (${b.quantity})`)].join(" · "),
       stale: isStale(l.countDate),
     })),
     ...list.handAdded.map((h) => ({

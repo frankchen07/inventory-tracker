@@ -29,14 +29,15 @@ export interface BuyListRow {
   rowIndex: number;
 }
 
-// An item under its threshold. countText/countDate are its last count;
-// boughtSince lists purchase quantities logged on or after that day.
+// An item under its threshold at its last count (countText/countDate).
+// boughtSince lists purchases logged on or after that day, shown as "bought"
+// labels until the next count.
 export interface LowItem {
   item: string;
   supplier: string;
   countText: string;
   countDate: string;
-  boughtSince: string[];
+  boughtSince: { date: string; quantity: string }[];
 }
 
 export interface BuyList {

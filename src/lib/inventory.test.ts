@@ -21,7 +21,7 @@ test("findCatalogItem matches case- and whitespace-insensitively", () => {
   assert.equal(findCatalogItem(catalog, "oatmilk"), undefined);
 });
 
-test("computeBuyList flags items under threshold, counting purchases made since the count", () => {
+test("computeBuyList flags items under threshold by count alone, noting purchases made since", () => {
   const catalog = [
     { ...item("12 oz paper cup", 2), supplier: "costco", unitConversion: CUPS, threshold: "12 sleeves" },
     { ...item("organic milk", 3), supplier: "costco", unitConversion: MILK, threshold: "8 boxes" },
@@ -57,9 +57,12 @@ test("computeBuyList flags items under threshold, counting purchases made since 
     // Same day as the count counts as bought since.
     { date: "2026-11-10", store: "costco", item: "12 oz paper cup", quantity: "1 sleeve", cost: null },
     { date: "2026-11-12", store: "costco", item: "organic milk", quantity: "2 boxes", cost: null },
-    // Enough to clear the pet cups; the milk bought before the count doesn't count.
-    { date: "2026-11-11", store: "costco", item: "12 oz pet cup", quantity: "1 box", cost: null },
+    // A purchase doesn't change the count, so the pet cups stay low, marked bought.
+    { date: "2026-11-11", store: "Costco", item: "12 OZ PET CUP", quantity: "1 box", cost: null },
+    // Before the count, so already in it.
     { date: "2026-11-09", store: "costco", item: "organic milk", quantity: "5 boxes", cost: null },
+    // Purchase quantities aren't parsed, so loose wording is fine.
+    { date: "2026-11-01", store: "costco", item: "napkins", quantity: "a few packs", cost: null },
   ];
   const buyRows = [
     { item: "napkins", added: "2026-11-14", done: false, rowIndex: 2 },
@@ -70,10 +73,12 @@ test("computeBuyList flags items under threshold, counting purchases made since 
   ];
 
   const list = computeBuyList(catalog, counts, countDates, buyRows, purchases);
+  const bought = (date: string, quantity: string) => ({ date, quantity });
   assert.deepEqual(list.low, [
-    { item: "12 oz paper cup", supplier: "costco", countText: "10 sleeves", countDate: "2026-11-10", boughtSince: ["1 sleeve"] },
-    { item: "organic milk", supplier: "costco", countText: "5 boxes and 1 carton", countDate: "2026-11-10", boughtSince: ["2 boxes"] },
-    { item: "napkins", supplier: "costco", countText: "0 packs", countDate: "2026-10-15", boughtSince: [] },
+    { item: "12 oz paper cup", supplier: "costco", countText: "10 sleeves", countDate: "2026-11-10", boughtSince: [bought("2026-11-10", "1 sleeve")] },
+    { item: "organic milk", supplier: "costco", countText: "5 boxes and 1 carton", countDate: "2026-11-10", boughtSince: [bought("2026-11-12", "2 boxes")] },
+    { item: "12 oz pet cup", supplier: "costco", countText: "6 sleeves", countDate: "2026-11-10", boughtSince: [bought("2026-11-11", "1 box")] },
+    { item: "napkins", supplier: "costco", countText: "0 packs", countDate: "2026-10-15", boughtSince: [bought("2026-11-01", "a few packs")] },
   ]);
   assert.deepEqual(list.handAdded, [
     { item: "blender pitcher", supplier: "", added: "2026-11-15", inCatalog: false },

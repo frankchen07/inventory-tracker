@@ -23,9 +23,11 @@ An `a items` tab (`item | unitCost`) was used the same way, then dropped on 2026
 chose to work off `inventory` alone; `threshold` stays the running-low line, so no column moved. Snapshot `getInventorySnapshot()` to JSON
 before and after any live sheet write, and `cmp` the two.
 
-Related convention, decided in the same work: `computeBuyList` adds purchases dated on or after an
-item's last count, so logging a purchase takes the item off the buy list until the next count. A
-version that valued monthly usage between counts (start + bought − end) needed a same-day tie rule
+Related convention, decided in the same work: the buy list goes by the latest count alone.
+Purchases dated on or after an item's count day only label it "bought" until the next count. An
+earlier version added those purchases to the count, which double-counted anything bought earlier
+on a count day and counted that evening; the next count resets things anyway, so the add was
+dropped. A version that valued monthly usage between counts (start + bought − end) needed a same-day tie rule
 and was dropped on 2026-11-17 for receipts only (`computeMonthSpend`). Frank's reasoning: the
 CEO looks at dollars and what's running out, not quantities used, and waste is too small to
 measure.

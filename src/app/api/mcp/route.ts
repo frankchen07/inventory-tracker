@@ -124,7 +124,7 @@ const mcpHandler = createMcpHandler(
       {
         title: "List inventory items",
         description:
-          "List every item in the inventory catalog with its category, supplier, unit conversion, restock threshold, and latest recorded count. packLevels are the units the item is counted in, each with how many of the smallest unit it holds — use them to convert what the user says. Use this to find the exact catalog name for an item and to check whether an item already exists before adding it. threshold is the running-low line: the dashboard flags an item once its latest count, plus purchases since, drops under it. Not every item gets counted — only record what was actually counted.",
+          "List every item in the inventory catalog with its category, supplier, unit conversion, restock threshold, and latest recorded count. packLevels are the units the item is counted in, each with how many of the smallest unit it holds — use them to convert what the user says. Use this to find the exact catalog name for an item and to check whether an item already exists before adding it. threshold is the running-low line: the dashboard flags an item once its latest count drops under it. Not every item gets counted — only record what was actually counted.",
         inputSchema: z.object({}),
       },
       async () => {
@@ -149,7 +149,7 @@ const mcpHandler = createMcpHandler(
       {
         title: "Update restock threshold",
         description:
-          "Change the restock threshold for one existing inventory item — the running-low line the dashboard flags it under, once its latest count plus purchases since drops below it. Write it as one amount in any of the item's packLevels units (see list_inventory_items), e.g. '10 sleeves', '500 cups', '1 box', or '1 box and 2 sleeves' — it's converted automatically. Translate what the user says into those units and read the converted amount back to them before calling. Unconvertible thresholds are rejected with the valid units.",
+          "Change the restock threshold for one existing inventory item — the running-low line the dashboard flags it under once its latest count drops below it. Write it as one amount in any of the item's packLevels units (see list_inventory_items), e.g. '10 sleeves', '500 cups', '1 box', or '1 box and 2 sleeves' — it's converted automatically. Translate what the user says into those units and read the converted amount back to them before calling. Unconvertible thresholds are rejected with the valid units.",
         inputSchema: z.object({
           item: z.string().describe("Item name as it appears in the inventory catalog"),
           threshold: z.string().describe("New threshold, e.g. '10 sleeves'"),
@@ -272,7 +272,7 @@ const mcpHandler = createMcpHandler(
       {
         title: "Record purchase",
         description:
-          "Log what was bought on one shopping run or delivery to the 'purchases' sheet — this is how the app knows what supplies cost. For catalog items, quantities use the item's packLevels units like a count (e.g. '6 boxes'); anything in needsUnit was not saved — ask which unit was meant and record it again. Things not in the inventory catalog (one-offs) are saved as said and listed in notInCatalog — tell the user, in case one was meant to be a catalog item. cost is the line total off the receipt; ask for it, since the monthly page only adds up entered costs. Buying an item also closes its open buy-list entries. A line matching one already logged (same date, store, item, quantity) is skipped as a likely repeat; if it really was bought twice, confirm with the user and record it again with allowDuplicate.",
+          "Log what was bought on one shopping run or delivery to the 'purchases' sheet — this is how the app knows what supplies cost. For catalog items, quantities use the item's packLevels units like a count (e.g. '6 boxes'); anything in needsUnit was not saved — ask which unit was meant and record it again. Things not in the inventory catalog (one-offs) are saved as said and listed in notInCatalog — tell the user, in case one was meant to be a catalog item. cost is the line total off the receipt; ask for it, since the monthly page only adds up entered costs. Buying an item also marks it bought on the buy list until its next count, and closes its hand-added entries. A line matching one already logged (same date, store, item, quantity) is skipped as a likely repeat; if it really was bought twice, confirm with the user and record it again with allowDuplicate.",
         inputSchema: z.object({
           date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe("Purchase date as YYYY-MM-DD. Defaults to today."),
           store: z.string().min(1).describe("Where it was bought, e.g. 'costco'"),
@@ -352,7 +352,7 @@ const mcpHandler = createMcpHandler(
       {
         title: "Get buy list",
         description:
-          "What to buy now: items whose latest count (plus purchases since) is under their threshold, with that count and its date, plus things added by hand, each with its supplier. Also lists anything that needs fixing in the sheet.",
+          "What to buy now: items whose latest count is under their threshold, with that count, its date, and anything already bought since (so it isn't bought twice), plus things added by hand, each with its supplier. Also lists anything that needs fixing in the sheet.",
         inputSchema: z.object({}),
       },
       async () => {
