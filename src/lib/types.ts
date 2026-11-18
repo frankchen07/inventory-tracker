@@ -11,24 +11,81 @@ export interface CatalogItem {
 }
 
 // A catalog item currently below its threshold.
-export interface RestockItem {
-  item: string;
-  supplier: string;
-  remaining: string;
-}
-
-// A catalog item with a recorded count that couldn't be converted to a
-// number (e.g. a bare "6" with no unit) — status unknown, not "in stock."
-export interface NeedsReviewItem {
-  item: string;
-  supplier: string;
-  countText: string;
-}
-
 export interface StaleCountItem {
   item: string;
   lastCounted: string;
   daysAgo: number;
+}
+
+// "purchases" tab row. quantity is in the item's own units like a count;
+// cost is the receipt total for the line, null when not entered.
+export interface PurchaseRow {
+  date: string;
+  store: string;
+  item: string;
+  quantity: string;
+  cost: number | null;
+}
+
+// "waste" tab row.
+export interface WasteRow {
+  date: string;
+  item: string;
+  quantity: string;
+  reason: string;
+}
+
+// "buy list" tab row: an eyeballed item someone flagged to buy.
+export interface BuyListRow {
+  item: string;
+  added: string;
+  done: boolean;
+  rowIndex: number;
+}
+
+// An A item below par: buy `buy` whole top-level packs (`unit`) to get back to it.
+// onHand is the last count's text; boughtSince is packs bought after it.
+export interface BuyLine {
+  item: string;
+  supplier: string;
+  onHand: string;
+  boughtSince: number;
+  buy: number;
+  unit: string;
+}
+
+export interface BuyList {
+  toBuy: BuyLine[];
+  handAdded: { item: string; supplier: string }[];
+  notCounted: string[];
+  needsReview: { item: string; problem: string }[];
+}
+
+// One A item's month, in top-level packs. start/end are the boundary counts
+// (last before the month, last in it); bought and wasted fall between them.
+export interface MonthLine {
+  item: string;
+  unit: string;
+  start: number;
+  bought: number;
+  wasted: number;
+  end: number;
+  used: number;
+  usedCost: number | null;
+}
+
+export interface MonthSummary {
+  lines: MonthLine[];
+  incomplete: { item: string; reason: string }[];
+  usedCost: number;
+  shelfCost: number;
+  wasteCost: number;
+  // A items with no unitCost, so their dollars are left out of the totals.
+  unpricedItems: string[];
+  // Calendar-month purchases: entered cost, else packs x unitCost.
+  spend: number;
+  unpricedPurchases: number;
+  runs: number;
 }
 
 // "recipes" sheet: a batch process (brewing, roasting) and what it yields.

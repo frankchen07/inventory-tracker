@@ -39,6 +39,23 @@ export const ORDERS_HEADERS = ["date", "customer", "item", "quantity", "quantity
 export const RESERVE_STOCK_SHEET = "reserve stock";
 export const RESERVE_STOCK_HEADERS = ["entity", "entityType", "amt", "amtUnit"] as const;
 
+// Money tracking for the inventory side. Separate tabs rather than extra
+// columns on "inventory", whose columns after threshold are all read as
+// count dates. Listing an item in "a items" is what makes it counted weekly;
+// unitCost is dollars per top-level pack (box, bottle, bag).
+export const A_ITEMS_SHEET = "a items";
+export const A_ITEMS_HEADERS = ["item", "unitCost"] as const;
+
+export const PURCHASES_SHEET = "purchases";
+export const PURCHASES_HEADERS = ["date", "store", "item", "quantity", "cost", "notes"] as const;
+
+export const WASTE_SHEET = "waste";
+export const WASTE_HEADERS = ["date", "item", "quantity", "reason"] as const;
+
+// Eyeballed items someone flagged to buy; done is TRUE once bought.
+export const BUY_LIST_SHEET = "buy list";
+export const BUY_LIST_HEADERS = ["item", "added", "done"] as const;
+
 let client: sheets_v4.Sheets | null = null;
 
 function getClient(): sheets_v4.Sheets {
@@ -113,6 +130,25 @@ export async function writeRow<H extends readonly string[]>(
   });
 }
 
+// Appends below the current last row, same reason as writeRow. Returns the
+// first written row.
+export async function appendRows<H extends readonly string[]>(
+  sheetName: string,
+  headers: H,
+  records: Record<H[number], string>[],
+): Promise<number> {
+  const existing = await readRows(sheetName, headers);
+  const first = Math.max(1, ...existing.map((r) => r._rowIndex)) + 1;
+  const last = first + records.length - 1;
+  await getClient().spreadsheets.values.update({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `${sheetName}!A${first}:${columnLetter(headers.length - 1)}${last}`,
+    valueInputOption: "USER_ENTERED",
+    requestBody: { values: records.map((record) => headers.map((h) => record[h as H[number]] ?? "")) },
+  });
+  return first;
+}
+
 export interface DateColumn {
   date: string;
   colIndex: number;
@@ -142,6 +178,8 @@ export interface LatestValues {
   valueAtRow: (rowIndex: number) => string;
   // Header date of the column that value came from, null if never counted.
   dateAtRow: (rowIndex: number) => string | null;
+  // Every non-blank count in that row, oldest first.
+  historyAtRow: (rowIndex: number) => { date: string; value: string }[];
   latestDate: string | null;
 }
 
@@ -157,20 +195,17 @@ export function mergeDateColumns(grid: unknown[][]): LatestValues {
     .filter((c) => c.date !== "")
     .sort((a, b) => a.date.localeCompare(b.date));
 
-  const values = rows.map(() => "");
-  const dates: (string | null)[] = rows.map(() => null);
+  const histories: { date: string; value: string }[][] = rows.map(() => []);
   for (const { date, i } of cols) {
     rows.forEach((row, r) => {
       const v = String(row?.[i] ?? "");
-      if (v !== "") {
-        values[r] = v;
-        dates[r] = date;
-      }
+      if (v !== "") histories[r].push({ date, value: v });
     });
   }
   return {
-    valueAtRow: (rowIndex) => values[rowIndex - 2] ?? "",
-    dateAtRow: (rowIndex) => dates[rowIndex - 2] ?? null,
+    valueAtRow: (rowIndex) => histories[rowIndex - 2]?.at(-1)?.value ?? "",
+    dateAtRow: (rowIndex) => histories[rowIndex - 2]?.at(-1)?.date ?? null,
+    historyAtRow: (rowIndex) => histories[rowIndex - 2] ?? [],
     latestDate: cols.at(-1)?.date ?? null,
   };
 }

@@ -33,6 +33,13 @@ test("mergeDateColumns carries forward by date and looks up by sheet row", () =>
   assert.equal(latest.dateAtRow(4), "2026-09-01");
   assert.equal(latest.dateAtRow(5), null);
   assert.equal(latest.dateAtRow(99), null);
+  assert.deepEqual(latest.historyAtRow(2), [
+    { date: "2026-09-01", value: "1 box" },
+    { date: "2026-09-15", value: "2 boxes" },
+  ]);
+  assert.deepEqual(latest.historyAtRow(4), [{ date: "2026-09-01", value: "4 sleeves" }]);
+  assert.deepEqual(latest.historyAtRow(5), []);
+  assert.deepEqual(latest.historyAtRow(99), []);
 });
 
 test("mergeDateColumns with no date columns", () => {
