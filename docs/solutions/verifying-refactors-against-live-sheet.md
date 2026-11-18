@@ -11,7 +11,7 @@ tends to touch.
 ## The solution / decision
 Capture a golden before and after, same day, and diff:
 1. **Data**: a throwaway script (outside the repo, or deleted after) that dumps
-   `computeProductionPlan()`, `getInventorySnapshot()` + `computeRestockList()` to JSON. Run with
+   `computeProductionPlan()`, `getInventorySnapshot()` + `computeBuyList()` to JSON. Run with
    `node --env-file=.env.local --import tsx ./script.mts out.json`.
 2. **HTML**: `next dev`, then curl `/` and `/production` with a signed
    `inventory_auth` cookie: `<expires>.<hmac>`, built like `createSessionToken` in `src/lib/auth.ts`

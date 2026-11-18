@@ -22,7 +22,7 @@ npm test   # unit tests for unit parsing and production math
 
 ## The sheet
 
-Six tabs, each a flat table with a header row (no numeric IDs — everything is keyed by name):
+Six core tabs, each a flat table with a header row (no numeric IDs — everything is keyed by name):
 
 - **inventory** — the purchased-goods catalog (item, category, supplier, unit conversion,
   threshold), plus one date column per physical count, oldest to newest.
@@ -33,10 +33,22 @@ Six tabs, each a flat table with a header row (no numeric IDs — everything is 
 - **reserve stock** — target on-hand levels for whichever products or recipes you keep a
   buffer of, shaped like `inventory` (fixed columns + one date column per physical count).
 
+Four more tabs track the money side of `inventory`. They're separate tabs because every column after
+`threshold` on `inventory` is read as a count date:
+
+- **a items** — `item | unitCost`. The items counted weekly; everything else is eyeballed. For these,
+  `threshold` is the par (the level to buy back up to) and `unitCost` is dollars per top-level pack.
+- **purchases** — `date | store | item | quantity | cost | notes`, one row per item bought.
+- **waste** — `date | item | quantity | reason`.
+- **buy list** — `item | added | done`, eyeballed items flagged by hand.
+
 ## Using it
 
-- **`/`** — inventory dashboard: what's low stock, what needs review (a count that couldn't be
-  parsed), what hasn't been counted in 7+ days, link to the raw sheet.
+- **`/`** — buy list: A items below par with how many whole packs to buy, plus hand-added items,
+  grouped by supplier; then A items never counted, not counted in 7+ days, or needing a fix.
+- **`/month`** — usage per A item between the last count before the month and the last one in it
+  (start + bought − end), valued at `unitCost`: used, sitting on the shelf, thrown out, and spend
+  per run. `?month=YYYY-MM` for other months.
 - **`/production`** — this week's plan as four steps: what's due from Wednesday through the
   following Tuesday (popup, deliveries, catering), what that takes from reserves, what orders still
   need made Mon/Tue, and how far reserves could be refilled (optional, your call). Counts are taken
@@ -58,9 +70,10 @@ Its main tool, `record_inventory_count(date?, counts: {item, count}[])`, matches
 against the live catalog (case-insensitive) and calls `writeCountColumn`, so counted items land in
 a dated column and everything else carries forward. Unrecognized item names are reported back
 instead of guessed, and a count 3x or more off the previous one comes back in `checkThese` for
-Claude to read back. The others: `list_inventory_items`, `update_item_threshold`,
-`add_inventory_item`, and `add_order` (a dated one-off order into `a la carte orders`, with the
-item matched to an exact product or recipe name).
+Claude to read back. The others: `list_inventory_items` (flags `aItem` for the weekly
+count), `update_item_threshold`, `add_inventory_item`, `add_order` (a dated one-off order into
+`a la carte orders`, with the item matched to an exact product or recipe name), `record_purchase`
+(also closes matching buy-list entries), `record_waste`, `add_to_buy_list`, and `get_buy_list`.
 
 The route enforces its own auth (a bearer token checked against `MCP_ACCESS_TOKEN`) rather than
 the app's cookie-based passphrase gate, since an MCP client can't hold a browser cookie —
