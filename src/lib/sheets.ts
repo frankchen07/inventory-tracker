@@ -49,9 +49,6 @@ export const A_ITEMS_HEADERS = ["item", "unitCost"] as const;
 export const PURCHASES_SHEET = "purchases";
 export const PURCHASES_HEADERS = ["date", "store", "item", "quantity", "cost", "notes"] as const;
 
-export const WASTE_SHEET = "waste";
-export const WASTE_HEADERS = ["date", "item", "quantity", "reason"] as const;
-
 // Eyeballed items someone flagged to buy; done is TRUE once bought.
 export const BUY_LIST_SHEET = "buy list";
 export const BUY_LIST_HEADERS = ["item", "added", "done"] as const;

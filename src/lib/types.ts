@@ -27,14 +27,6 @@ export interface PurchaseRow {
   cost: number | null;
 }
 
-// "waste" tab row.
-export interface WasteRow {
-  date: string;
-  item: string;
-  quantity: string;
-  reason: string;
-}
-
 // "buy list" tab row: an eyeballed item someone flagged to buy.
 export interface BuyListRow {
   item: string;
@@ -61,31 +53,17 @@ export interface BuyList {
   needsReview: { item: string; problem: string }[];
 }
 
-// One A item's month, in top-level packs. start/end are the boundary counts
-// (last before the month, last in it); bought and wasted fall between them.
-export interface MonthLine {
-  item: string;
-  unit: string;
-  start: number;
-  bought: number;
-  wasted: number;
-  end: number;
-  used: number;
-  usedCost: number | null;
-}
-
-export interface MonthSummary {
-  lines: MonthLine[];
-  incomplete: { item: string; reason: string }[];
-  usedCost: number;
-  shelfCost: number;
-  wasteCost: number;
-  // A items with no unitCost, so their dollars are left out of the totals.
-  unpricedItems: string[];
-  // Calendar-month purchases: entered cost, else packs x unitCost.
+// The calendar month's receipts. Lines with no receipt cost use packs x
+// unitCost; lines with neither are counted in `unpriced`, not guessed.
+export interface MonthSpend {
   spend: number;
-  unpricedPurchases: number;
   runs: number;
+  unpricedPurchases: number;
+  byStore: { store: string; spend: number; unpriced: number }[];
+  byItem: { item: string; spend: number; unpriced: number }[];
+  // A items' value at their last count in or before the month; date is the
+  // latest of those counts, null if none.
+  shelf: { date: string | null; value: number; unpricedItems: string[] };
 }
 
 // "recipes" sheet: a batch process (brewing, roasting) and what it yields.

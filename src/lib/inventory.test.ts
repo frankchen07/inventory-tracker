@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { computeBuyList, computeMonth, computeStaleCounts, findCatalogItem, planPurchase, toPacks } from "@/lib/inventory";
+import { computeBuyList, computeMonthSpend, computeStaleCounts, findCatalogItem, planPurchase, toPacks } from "@/lib/inventory";
 import type { CatalogItem } from "@/lib/types";
 
 const item = (name: string, rowIndex: number): CatalogItem => ({
@@ -84,7 +84,7 @@ test("computeBuyList fills A items back up to par in whole packs, counting purch
     { item: "dish soap", added: "2026-11-10", done: true, rowIndex: 5 },
   ];
   const purchases = [
-    // Same day as the count: counts are taken after service, so it's already in the count.
+    // Same day as the count still counts: logging a purchase takes it off the list.
     { date: "2026-11-10", store: "costco", item: "12 oz paper cup", quantity: "1 box", cost: null },
     { date: "2026-11-12", store: "costco", item: "organic milk", quantity: "2 boxes", cost: null },
     { date: "2026-11-11", store: "costco", item: "12 oz pet cup", quantity: "1 box", cost: null },
@@ -93,82 +93,13 @@ test("computeBuyList fills A items back up to par in whole packs, counting purch
   assert.deepEqual(
     list.toBuy.map((b) => [b.item, b.onHand, b.boughtSince, b.buy, b.unit]),
     [
-      ["12 oz paper cup", "10 sleeves", 0, 2, "box"],
+      ["12 oz paper cup", "10 sleeves", 1, 1, "box"],
       ["organic milk", "5 boxes and 1 carton", 2, 1, "box"],
     ],
   );
   assert.deepEqual(list.handAdded, [{ item: "napkins", supplier: "costco" }]);
   assert.deepEqual(list.notCounted, ["matcha"]);
   assert.deepEqual(list.needsReview, [{ item: "ice", problem: "no par set (threshold column)" }]);
-});
-
-test("computeMonth values usage as start + bought - end between the month's boundary counts", () => {
-  const catalog = [
-    { ...item("oat milk", 2), unitConversion: MILK },
-    { ...item("organic milk", 3), unitConversion: MILK },
-    { ...item("matcha", 4), unitConversion: "1 bag" },
-    { ...item("napkins", 5), unitConversion: "1 pack" },
-  ];
-  const history = new Map([
-    ["oat milk", [
-      { date: "2026-10-28", value: "4 boxes" },
-      { date: "2026-11-10", value: "3 boxes" },
-      { date: "2026-11-24", value: "2 boxes" },
-    ]],
-    ["organic milk", [{ date: "2026-11-10", value: "8 boxes" }]],
-    ["matcha", [{ date: "2026-10-28", value: "1 bag" }, { date: "2026-11-24", value: "2 bags" }]],
-  ]);
-  const aItems = new Map([["oat milk", 20], ["organic milk", 12], ["matcha", null]]);
-  const purchases = [
-    { date: "2026-11-05", store: "costco", item: "oat milk", quantity: "6 boxes", cost: null },
-    { date: "2026-11-05", store: "Costco", item: "napkins", quantity: "1 pack", cost: 18 },
-    { date: "2026-11-12", store: "costco", item: "matcha", quantity: "1 bag", cost: 30 },
-    { date: "2026-11-27", store: "costco", item: "oat milk", quantity: "2 boxes", cost: null },
-    { date: "2026-11-28", store: "amazon", item: "dish soap", quantity: "1 bottle", cost: null },
-    { date: "2026-10-30", store: "costco", item: "oat milk", quantity: "1 box", cost: null },
-  ];
-  const waste = [{ date: "2026-11-20", item: "oat milk", quantity: "3 cartons", reason: "expired" }];
-
-  const m = computeMonth(catalog, history, aItems, purchases, waste, "2026-11");
-  // Oat milk: counted 10-28 (4) and 11-24 (2); bought 1 (10-30) + 6 (11-05) in between; the
-  // 11-27 purchase is after the last count, so it's next period's.
-  assert.deepEqual(m.lines.map((l) => [l.item, l.start, l.bought, l.wasted, l.end, l.used, l.usedCost]), [
-    ["oat milk", 4, 7, 1, 2, 9, 180],
-    ["matcha", 1, 1, 0, 2, 0, null],
-  ]);
-  assert.deepEqual(m.incomplete, [{ item: "organic milk", reason: "no count before 2026-11" }]);
-  assert.equal(m.usedCost, 180);
-  assert.equal(m.shelfCost, 40);
-  assert.equal(m.wasteCost, 20);
-  assert.deepEqual(m.unpricedItems, ["matcha"]);
-  // In-month spend: 6 + 2 boxes oat milk at $20, napkins $18, matcha $30; dish soap unpriced.
-  assert.equal(m.spend, 208);
-  assert.equal(m.unpricedPurchases, 1);
-  // Runs: costco 11-05 (case-insensitive), costco 11-12, costco 11-27, amazon 11-28.
-  assert.equal(m.runs, 4);
-});
-
-test("computeMonth puts a count-day purchase in the count, and flags negative usage", () => {
-  const catalog = [
-    { ...item("12 oz pet lid", 2), unitConversion: CUPS },
-    { ...item("crown maple bourbon syrup", 3), unitConversion: "1 bottle" },
-  ];
-  const history = new Map([
-    ["12 oz pet lid", [{ date: "2026-10-31", value: "2 boxes" }, { date: "2026-11-20", value: "3 boxes" }]],
-    ["crown maple bourbon syrup", [{ date: "2026-10-31", value: "1 bottle" }, { date: "2026-11-20", value: "4 bottles" }]],
-  ]);
-  const aItems = new Map([["12 oz pet lid", 40], ["crown maple bourbon syrup", 15]]);
-  const purchases = [
-    // On the start count's day: already in that count, so not this period's.
-    { date: "2026-10-31", store: "costco", item: "12 oz pet lid", quantity: "5 boxes", cost: null },
-    // On the end count's day: in that count, so this period's.
-    { date: "2026-11-20", store: "costco", item: "12 oz pet lid", quantity: "1 box", cost: null },
-  ];
-  const m = computeMonth(catalog, history, aItems, purchases, [], "2026-11");
-  assert.deepEqual(m.lines.map((l) => [l.item, l.start, l.bought, l.end, l.used]), [["12 oz pet lid", 2, 1, 3, 0]]);
-  assert.deepEqual(m.incomplete, [
-    { item: "crown maple bourbon syrup", reason: "used came out negative, so a purchase probably wasn't logged" },
-  ]);
 });
 
 test("planPurchase skips exact repeats but still closes their buy-list rows, so a retry finishes the job", () => {
@@ -205,4 +136,60 @@ test("computeBuyList never lists a zero-pack buy from float dust", () => {
     [],
   );
   assert.deepEqual(list.toBuy, []);
+});
+
+test("computeMonthSpend totals the calendar month's receipts, falling back to unit cost", () => {
+  const catalog = [
+    { ...item("oat milk", 2), unitConversion: MILK },
+    { ...item("napkins", 3), unitConversion: "1 pack" },
+    { ...item("matcha", 4), unitConversion: "1 bag" },
+    { ...item("dish soap", 5), unitConversion: "1 bottle" },
+  ];
+  const aItems = new Map([["oat milk", 20], ["matcha", null]]);
+  const purchases = [
+    { date: "2026-11-05", store: "costco", item: "oat milk", quantity: "6 boxes", cost: null },
+    { date: "2026-11-05", store: "Costco", item: "napkins", quantity: "1 pack", cost: 18 },
+    { date: "2026-11-12", store: "costco", item: "matcha", quantity: "1 bag", cost: 30 },
+    { date: "2026-11-27", store: "costco", item: "oat milk", quantity: "2 boxes", cost: null },
+    { date: "2026-11-28", store: "amazon", item: "dish soap", quantity: "1 bottle", cost: null },
+    { date: "2026-10-30", store: "costco", item: "oat milk", quantity: "1 box", cost: null },
+    { date: "2026-12-01", store: "costco", item: "oat milk", quantity: "1 box", cost: null },
+  ];
+  const history = new Map([
+    ["oat milk", [
+      { date: "2026-10-28", value: "4 boxes" },
+      { date: "2026-11-24", value: "2 boxes" },
+      { date: "2026-12-03", value: "5 boxes" },
+    ]],
+    ["matcha", [{ date: "2026-11-24", value: "2 bags" }]],
+  ]);
+
+  const m = computeMonthSpend(catalog, aItems, purchases, history, "2026-11");
+  // 6 + 2 boxes of oat milk at $20, napkins $18 and matcha $30 off receipts; dish soap has no price.
+  assert.equal(m.spend, 208);
+  assert.equal(m.unpricedPurchases, 1);
+  // costco 11-05 (either case), costco 11-12, costco 11-27, amazon 11-28.
+  assert.equal(m.runs, 4);
+  assert.deepEqual(m.byStore, [
+    { store: "costco", spend: 208, unpriced: 0 },
+    { store: "amazon", spend: 0, unpriced: 1 },
+  ]);
+  assert.deepEqual(m.byItem, [
+    { item: "oat milk", spend: 160, unpriced: 0 },
+    { item: "matcha", spend: 30, unpriced: 0 },
+    { item: "napkins", spend: 18, unpriced: 0 },
+    { item: "dish soap", spend: 0, unpriced: 1 },
+  ]);
+  // Shelf value at each A item's last count in or before November.
+  assert.deepEqual(m.shelf, { date: "2026-11-24", value: 40, unpricedItems: ["matcha"] });
+});
+
+test("computeMonthSpend with no purchases or counts in the month", () => {
+  const catalog = [{ ...item("oat milk", 2), unitConversion: MILK }];
+  const history = new Map([["oat milk", [{ date: "2026-11-24", value: "2 boxes" }]]]);
+  const m = computeMonthSpend(catalog, new Map([["oat milk", 20]]), [], history, "2026-09");
+  assert.equal(m.spend, 0);
+  assert.equal(m.runs, 0);
+  assert.deepEqual(m.byStore, []);
+  assert.deepEqual(m.shelf, { date: null, value: 0, unpricedItems: [] });
 });

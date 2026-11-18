@@ -5,8 +5,6 @@ import {
   A_ITEMS_HEADERS,
   PURCHASES_SHEET,
   PURCHASES_HEADERS,
-  WASTE_SHEET,
-  WASTE_HEADERS,
   BUY_LIST_SHEET,
   BUY_LIST_HEADERS,
   appendRows,
@@ -22,11 +20,9 @@ import type {
   BuyList,
   BuyListRow,
   CatalogItem,
-  MonthLine,
-  MonthSummary,
+  MonthSpend,
   PurchaseRow,
   StaleCountItem,
-  WasteRow,
 } from "@/lib/types";
 
 export async function getCatalog(): Promise<CatalogItem[]> {
@@ -110,11 +106,6 @@ export async function getPurchases(): Promise<PurchaseRow[]> {
   return rows.map((r) => ({ date: r.date, store: r.store, item: r.item, quantity: r.quantity, cost: parseMoney(r.cost) }));
 }
 
-export async function getWaste(): Promise<WasteRow[]> {
-  const rows = await readRows(WASTE_SHEET, WASTE_HEADERS);
-  return rows.map((r) => ({ date: r.date, item: r.item, quantity: r.quantity, reason: r.reason }));
-}
-
 export async function getBuyListRows(): Promise<BuyListRow[]> {
   const rows = await readRows(BUY_LIST_SHEET, BUY_LIST_HEADERS);
   return rows.map((r) => ({ item: r.item, added: r.added, done: r.done.trim().toUpperCase() === "TRUE", rowIndex: r._rowIndex }));
@@ -122,10 +113,6 @@ export async function getBuyListRows(): Promise<BuyListRow[]> {
 
 export async function addPurchases(rows: Record<(typeof PURCHASES_HEADERS)[number], string>[]): Promise<void> {
   await appendRows(PURCHASES_SHEET, PURCHASES_HEADERS, rows);
-}
-
-export async function addWaste(rows: Record<(typeof WASTE_HEADERS)[number], string>[]): Promise<void> {
-  await appendRows(WASTE_SHEET, WASTE_HEADERS, rows);
 }
 
 export async function addToBuyList(items: string[], date: string): Promise<void> {
@@ -190,10 +177,9 @@ export function toPacks(text: string, unitConversion: string): number | null {
 const sameItem = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 
 // threshold is the par for A items: the level to buy back up to, in whole
-// packs since that's how things are bought. Purchases dated after an item's
-// last count are added to it, so a run made since the count doesn't get
-// bought twice. Counts are taken after service, so a purchase dated the same
-// day as the count is already in it (same rule as orders in production.ts).
+// packs since that's how things are bought. Purchases dated on or after an
+// item's last count are added to it, so logging a purchase takes the item off
+// the list until the next count.
 export function computeBuyList(
   catalog: CatalogItem[],
   counts: Map<string, string>,
@@ -218,7 +204,7 @@ export function computeBuyList(
       list.needsReview.push({ item: c.item, problem: `can't read the count "${countText}"` });
       continue;
     }
-    const since = purchases.filter((p) => sameItem(p.item, c.item) && p.date > countDate);
+    const since = purchases.filter((p) => sameItem(p.item, c.item) && p.date >= countDate);
     const boughtAtomic = since.map((p) => parseReportedQuantity(p.quantity, levels));
     if (boughtAtomic.includes(null)) {
       list.needsReview.push({ item: c.item, problem: "can't read a purchase quantity since the last count" });
@@ -307,103 +293,68 @@ export async function loadBuyList() {
   return { ...snapshot, aItems, unknownAItems: unknown, list };
 }
 
-// Usage between the month's boundary counts: the last count before the month
-// and the last one in it. Purchases and waste count only if dated after the
-// first and on or before the second — a buy after the last count lands in the
-// next period, and one on a count's own day is already in that count.
-export function computeMonth(
+// The calendar month's receipts: each line at its receipt cost, else packs x
+// the item's unitCost, else counted as unpriced. Shelf value is each A item's
+// last count in or before the month, at unitCost.
+export function computeMonthSpend(
   catalog: CatalogItem[],
-  history: Map<string, { date: string; value: string }[]>,
   aItems: Map<string, number | null>,
   purchases: PurchaseRow[],
-  waste: WasteRow[],
+  history: Map<string, { date: string; value: string }[]>,
   month: string,
-): MonthSummary {
-  const monthStart = `${month}-01`;
-  const summary: MonthSummary = {
-    lines: [],
-    incomplete: [],
-    usedCost: 0,
-    shelfCost: 0,
-    wasteCost: 0,
-    unpricedItems: [],
+): MonthSpend {
+  const result: MonthSpend = {
     spend: 0,
-    unpricedPurchases: 0,
     runs: 0,
+    unpricedPurchases: 0,
+    byStore: [],
+    byItem: [],
+    shelf: { date: null, value: 0, unpricedItems: [] },
   };
+  const stores = new Map<string, { store: string; spend: number; unpriced: number }>();
+  const items = new Map<string, { item: string; spend: number; unpriced: number }>();
+  const runs = new Set<string>();
+
+  for (const p of purchases) {
+    if (!p.date.startsWith(month)) continue;
+    const storeKey = p.store.trim().toLowerCase();
+    runs.add(`${p.date}|${storeKey}`);
+    const match = findCatalogItem(catalog, p.item);
+    const name = match?.item ?? p.item.trim();
+    const store = stores.get(storeKey) ?? { store: p.store.trim(), spend: 0, unpriced: 0 };
+    const line = items.get(name) ?? { item: name, spend: 0, unpriced: 0 };
+    stores.set(storeKey, store);
+    items.set(name, line);
+
+    let value = p.cost;
+    if (value === null && match) {
+      const unitCost = aItems.get(match.item) ?? null;
+      const packs = toPacks(p.quantity, match.unitConversion);
+      if (unitCost !== null && packs !== null) value = packs * unitCost;
+    }
+    if (value === null) {
+      result.unpricedPurchases++;
+      store.unpriced++;
+      line.unpriced++;
+    } else {
+      result.spend += value;
+      store.spend += value;
+      line.spend += value;
+    }
+  }
+  result.runs = runs.size;
+  result.byStore = [...stores.values()].sort((a, b) => b.spend - a.spend);
+  result.byItem = [...items.values()].sort((a, b) => b.spend - a.spend);
 
   for (const c of catalog) {
     if (!aItems.has(c.item)) continue;
-    const counts = history.get(c.item) ?? [];
-    const startCount = counts.filter((h) => h.date < monthStart).at(-1);
-    const endCount = counts.filter((h) => h.date.startsWith(month)).at(-1);
-    if (!startCount) {
-      summary.incomplete.push({ item: c.item, reason: `no count before ${month}` });
-      continue;
-    }
-    if (!endCount) {
-      summary.incomplete.push({ item: c.item, reason: `not counted yet in ${month}` });
-      continue;
-    }
-
-    const between = (date: string) => date > startCount.date && date <= endCount.date;
-    const sumPacks = (rows: { item: string; date: string; quantity: string }[]) =>
-      rows
-        .filter((r) => sameItem(r.item, c.item) && between(r.date))
-        .reduce<number | null>((sum, r) => {
-          const packs = toPacks(r.quantity, c.unitConversion);
-          return sum === null || packs === null ? null : sum + packs;
-        }, 0);
-
-    const start = toPacks(startCount.value, c.unitConversion);
-    const end = toPacks(endCount.value, c.unitConversion);
-    const bought = sumPacks(purchases);
-    const wasted = sumPacks(waste);
-    if (start === null || end === null || bought === null || wasted === null) {
-      summary.incomplete.push({ item: c.item, reason: "a count, purchase, or waste quantity can't be read" });
-      continue;
-    }
-
-    const used = start + bought - end;
-    if (used < -1e-9) {
-      summary.incomplete.push({ item: c.item, reason: "used came out negative, so a purchase probably wasn't logged" });
-      continue;
-    }
+    const last = (history.get(c.item) ?? []).filter((h) => h.date.slice(0, 7) <= month).at(-1);
+    if (!last) continue;
+    if (!result.shelf.date || last.date > result.shelf.date) result.shelf.date = last.date;
     const unitCost = aItems.get(c.item) ?? null;
-    const line: MonthLine = {
-      item: c.item,
-      unit: parseConversion(c.unitConversion)[0].unit,
-      start,
-      bought,
-      wasted,
-      end,
-      used,
-      usedCost: unitCost === null ? null : used * unitCost,
-    };
-    summary.lines.push(line);
-    if (unitCost === null) {
-      summary.unpricedItems.push(c.item);
-    } else {
-      summary.usedCost += used * unitCost;
-      summary.shelfCost += end * unitCost;
-      summary.wasteCost += wasted * unitCost;
-    }
+    const packs = toPacks(last.value, c.unitConversion);
+    if (unitCost === null || packs === null) result.shelf.unpricedItems.push(c.item);
+    else result.shelf.value += packs * unitCost;
   }
-
-  const runs = new Set<string>();
-  for (const p of purchases) {
-    if (!p.date.startsWith(month)) continue;
-    runs.add(`${p.date}|${p.store.trim().toLowerCase()}`);
-    if (p.cost !== null) {
-      summary.spend += p.cost;
-      continue;
-    }
-    const match = findCatalogItem(catalog, p.item);
-    const unitCost = match ? aItems.get(match.item) ?? null : null;
-    const packs = match ? toPacks(p.quantity, match.unitConversion) : null;
-    if (unitCost === null || packs === null) summary.unpricedPurchases++;
-    else summary.spend += packs * unitCost;
-  }
-  summary.runs = runs.size;
-  return summary;
+  return result;
 }

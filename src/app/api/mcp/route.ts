@@ -6,7 +6,6 @@ import {
   addCatalogItem,
   addPurchases,
   addToBuyList,
-  addWaste,
   findCatalogItem,
   getAItems,
   getBuyListRows,
@@ -313,46 +312,6 @@ const mcpHandler = createMcpHandler(
           ...(needsUnit.length > 0 && { needsUnit }),
           ...(skippedAsRepeat.length > 0 && { skippedAsRepeat }),
           ...(close.length > 0 && { closedOnBuyList: close.map((r) => r.item) }),
-        });
-      },
-    );
-
-    server.registerTool(
-      "record_waste",
-      {
-        title: "Record waste",
-        description:
-          "Log weekly-counted supplies (aItem in list_inventory_items) thrown out — expired, spilled, went flat — to the 'waste' sheet, so the monthly page can show what waste cost. Other items aren't tracked, so they're rejected in notWeeklyItems. Quantities use the item's packLevels units. Unrecognized names and anything in needsUnit are not saved — check the name or unit and record it again.",
-        inputSchema: z.object({
-          date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe("Date as YYYY-MM-DD. Defaults to today."),
-          items: z
-            .array(
-              z.object({
-                item: z.string().describe("Item name as it appears in the inventory catalog"),
-                quantity: z.string().describe("Amount in the item's units, e.g. '2 cartons'"),
-                reason: z.string().describe("Why, e.g. 'expired'"),
-              }),
-            )
-            .min(1),
-        }),
-      },
-      async ({ date, items }) => {
-        const catalog = await getCatalog();
-        const { aItems } = await getAItems(catalog);
-        const targetDate = date ?? todayISO();
-        const { matched, unrecognized, needsUnit } = resolveLines(catalog, items);
-        const notWeeklyItems = matched.filter((l) => !aItems.has(l.item)).map((l) => l.item);
-        const rows = matched
-          .filter((l) => aItems.has(l.item))
-          .map((l) => ({ date: targetDate, item: l.item, quantity: l.quantity, reason: l.reason.trim() }));
-
-        if (rows.length > 0) await addWaste(rows);
-        return result({
-          date: targetDate,
-          written: rows.map((r) => r.item),
-          unrecognized,
-          ...(needsUnit.length > 0 && { needsUnit }),
-          ...(notWeeklyItems.length > 0 && { notWeeklyItems }),
         });
       },
     );
