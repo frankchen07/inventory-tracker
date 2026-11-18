@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { addDays, todayISO } from "@/lib/dates";
-import { computeMonthSpend, getAItems, getInventorySnapshot, getPurchases } from "@/lib/inventory";
+import { computeMonthSpend, getCatalog, getPurchases } from "@/lib/inventory";
 
 export const dynamic = "force-dynamic";
 
@@ -11,11 +11,6 @@ const dollars = (n: number) => `$${Math.round(n).toLocaleString("en-US")}`;
 function monthLabel(month: string): string {
   const [y, m] = month.split("-").map(Number);
   return new Date(y, m - 1, 1).toLocaleDateString("en-US", { month: "long", year: "numeric" });
-}
-
-function dayLabel(date: string): string {
-  const [y, m, d] = date.split("-").map(Number);
-  return new Date(y, m - 1, d).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
 function amount(spend: number, unpriced: number): string {
@@ -30,9 +25,8 @@ export default async function MonthPage({ searchParams }: { searchParams: Promis
   const month = requested && /^\d{4}-(0[1-9]|1[0-2])$/.test(requested) ? requested : thisMonth;
   const prevMonth = addDays(`${month}-01`, -1).slice(0, 7);
 
-  const [{ catalog, history }, purchases] = await Promise.all([getInventorySnapshot(), getPurchases()]);
-  const { aItems, unknown } = await getAItems(catalog);
-  const m = computeMonthSpend(catalog, aItems, purchases, history, month);
+  const [catalog, purchases] = await Promise.all([getCatalog(), getPurchases()]);
+  const m = computeMonthSpend(catalog, purchases, month);
 
   return (
     <main className="mx-auto w-full max-w-[900px] px-4 pb-14 pt-7 text-[18px] leading-[1.35] text-zinc-900 tabular-nums">
@@ -63,25 +57,7 @@ export default async function MonthPage({ searchParams }: { searchParams: Promis
             {m.unpricedPurchases === 1 ? "it's" : "they're"} not in that total.
           </p>
         )}
-        {m.shelf.date ? (
-          <p>
-            <b>{dollars(m.shelf.value)}</b> on the shelf at the last count ({dayLabel(m.shelf.date)}).
-          </p>
-        ) : (
-          <p className="text-zinc-600">No counts recorded by the end of {monthLabel(month)}.</p>
-        )}
-        {m.shelf.unpricedItems.length > 0 && (
-          <p className="text-base text-zinc-600">
-            No unit cost yet for {m.shelf.unpricedItems.join(", ")}, so they&apos;re left out of the shelf value.
-          </p>
-        )}
       </div>
-
-      {unknown.length > 0 && (
-        <p className="mt-5 font-bold text-red-700">
-          Not in inventory, so left out: {unknown.join(", ")}. Fix the name in the a items tab.
-        </p>
-      )}
 
       {m.byStore.length > 0 && (
         <section className="mt-9">

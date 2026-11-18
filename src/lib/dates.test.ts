@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { todayISO } from "@/lib/dates";
+import { shortDate, todayISO } from "@/lib/dates";
 
 test("todayISO uses the shop's Pacific calendar day, not UTC", () => {
   assert.equal(todayISO(new Date("2026-10-05T02:00:00Z")), "2026-10-04");
@@ -8,4 +8,9 @@ test("todayISO uses the shop's Pacific calendar day, not UTC", () => {
   // PST (UTC-8) after the November DST change.
   assert.equal(todayISO(new Date("2026-11-10T07:30:00Z")), "2026-11-09");
   assert.equal(todayISO(new Date("2026-11-10T08:30:00Z")), "2026-11-10");
+});
+
+test("shortDate reads like a calendar day", () => {
+  assert.equal(shortDate("2026-10-15"), "Oct 15");
+  assert.equal(shortDate("2026-03-01"), "Mar 1");
 });

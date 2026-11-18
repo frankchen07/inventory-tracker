@@ -41,11 +41,7 @@ export const RESERVE_STOCK_HEADERS = ["entity", "entityType", "amt", "amtUnit"] 
 
 // Money tracking for the inventory side. Separate tabs rather than extra
 // columns on "inventory", whose columns after threshold are all read as
-// count dates. Listing an item in "a items" is what makes it counted weekly;
-// unitCost is dollars per top-level pack (box, bottle, bag).
-export const A_ITEMS_SHEET = "a items";
-export const A_ITEMS_HEADERS = ["item", "unitCost"] as const;
-
+// count dates.
 export const PURCHASES_SHEET = "purchases";
 export const PURCHASES_HEADERS = ["date", "store", "item", "quantity", "cost", "notes"] as const;
 

@@ -7,7 +7,6 @@ import {
   addPurchases,
   addToBuyList,
   findCatalogItem,
-  getAItems,
   getBuyListRows,
   getCatalog,
   getInventorySnapshot,
@@ -26,17 +25,19 @@ function result(payload: object, isError = false) {
   return { content: [{ type: "text" as const, text: JSON.stringify(payload) }], isError };
 }
 
-// Matches each line to the catalog and checks its quantity converts; lines
-// that don't are reported back, never saved, so a mis-heard name or unit
-// can't land in the money numbers.
+// Catalog items get the catalog's spelling and must have a quantity that
+// converts (a mis-heard unit is reported back, never saved). Anything not in
+// the catalog passes through as said and is listed in notInCatalog, so Claude
+// can check it wasn't a mis-heard catalog item.
 function resolveLines<T extends { item: string; quantity: string }>(catalog: CatalogItem[], lines: T[]) {
   const matched: T[] = [];
-  const unrecognized: string[] = [];
+  const notInCatalog: string[] = [];
   const needsUnit: { item: string; quantity: string; units: string[] }[] = [];
   for (const line of lines) {
     const match = findCatalogItem(catalog, line.item);
     if (!match) {
-      unrecognized.push(line.item);
+      notInCatalog.push(line.item.trim());
+      matched.push({ ...line, item: line.item.trim(), quantity: line.quantity.trim() });
       continue;
     }
     const levels = parseConversion(match.unitConversion);
@@ -46,7 +47,7 @@ function resolveLines<T extends { item: string; quantity: string }>(catalog: Cat
     }
     matched.push({ ...line, item: match.item, quantity: line.quantity.trim() });
   }
-  return { matched, unrecognized, needsUnit };
+  return { matched, notInCatalog, needsUnit };
 }
 
 const mcpHandler = createMcpHandler(
@@ -123,17 +124,15 @@ const mcpHandler = createMcpHandler(
       {
         title: "List inventory items",
         description:
-          "List every item in the inventory catalog with its category, supplier, unit conversion, restock threshold, and latest recorded count. packLevels are the units the item is counted in, each with how many of the smallest unit it holds — use them to convert what the user says. Use this to find the exact catalog name for an item and to check whether an item already exists before adding it. aItem marks the items counted weekly: for a weekly count, walk the user through only the aItem items, one at a time; everything else is eyeballed and goes on the buy list by hand. For an aItem, threshold is its par — the level to buy back up to.",
+          "List every item in the inventory catalog with its category, supplier, unit conversion, restock threshold, and latest recorded count. packLevels are the units the item is counted in, each with how many of the smallest unit it holds — use them to convert what the user says. Use this to find the exact catalog name for an item and to check whether an item already exists before adding it. threshold is the running-low line: the dashboard flags an item once its latest count, plus purchases since, drops under it. Not every item gets counted — only record what was actually counted.",
         inputSchema: z.object({}),
       },
       async () => {
         const { catalog, counts, latestDate } = await getInventorySnapshot();
-        const { aItems } = await getAItems(catalog);
         return result({
           latestDate,
           items: catalog.map((c) => ({
             item: c.item,
-            aItem: aItems.has(c.item),
             category: c.category,
             supplier: c.supplier,
             unitConversion: c.unitConversion,
@@ -148,9 +147,9 @@ const mcpHandler = createMcpHandler(
     server.registerTool(
       "update_item_threshold",
       {
-        title: "Update par",
+        title: "Update restock threshold",
         description:
-          "Change the threshold for one existing inventory item. For a weekly-counted item (aItem in list_inventory_items) this is its par: the level the buy list fills it back up to. Other items aren't counted, so their threshold isn't used. Write it as one amount in any of the item's packLevels units (see list_inventory_items), e.g. '10 sleeves', '500 cups', '1 box', or '1 box and 2 sleeves' — it's converted automatically. Translate what the user says into those units and read the converted amount back to them before calling. Unconvertible thresholds are rejected with the valid units.",
+          "Change the restock threshold for one existing inventory item — the running-low line the dashboard flags it under, once its latest count plus purchases since drops below it. Write it as one amount in any of the item's packLevels units (see list_inventory_items), e.g. '10 sleeves', '500 cups', '1 box', or '1 box and 2 sleeves' — it's converted automatically. Translate what the user says into those units and read the converted amount back to them before calling. Unconvertible thresholds are rejected with the valid units.",
         inputSchema: z.object({
           item: z.string().describe("Item name as it appears in the inventory catalog"),
           threshold: z.string().describe("New threshold, e.g. '10 sleeves'"),
@@ -174,7 +173,7 @@ const mcpHandler = createMcpHandler(
       {
         title: "Add inventory item",
         description:
-          "Add a new item to the inventory catalog. Only for items that are genuinely new: call list_inventory_items first and rule out a differently-worded existing item. Confirm the name, category, supplier, and pack size with the user before calling — never guess a supplier or pack size. Reuse an existing category where one fits. Threshold is optional and follows the same format as update_item_threshold; it's only used once the item is listed in the 'a items' tab. This does not record a count; call record_inventory_count afterwards for that.",
+          "Add a new item to the inventory catalog. Only for items that are genuinely new: call list_inventory_items first and rule out a differently-worded existing item. Confirm the name, category, supplier, and pack size with the user before calling — never guess a supplier or pack size. Reuse an existing category where one fits. Threshold is optional and follows the same format as update_item_threshold. This does not record a count; call record_inventory_count afterwards for that.",
         inputSchema: z.object({
           item: z.string().min(1).describe("Item name, lowercase like the rest of the catalog, e.g. 'oat flour'"),
           category: z.string().min(1).describe("Existing category where one fits, e.g. 'consumables'"),
@@ -273,16 +272,16 @@ const mcpHandler = createMcpHandler(
       {
         title: "Record purchase",
         description:
-          "Log what was bought on one shopping run or delivery to the 'purchases' sheet — this is how the app knows what supplies cost. Quantities use the item's packLevels units like a count (e.g. '6 boxes'). cost is the line total off the receipt if the user has it; leave it out otherwise and the item's unit cost is used. Buying an item also closes its open buy-list entries. Unrecognized names and anything in needsUnit are not saved — check the name or unit and record it again. A line matching one already logged (same date, store, item, quantity) is skipped as a likely repeat; if it really was bought twice, confirm with the user and record it again with allowDuplicate.",
+          "Log what was bought on one shopping run or delivery to the 'purchases' sheet — this is how the app knows what supplies cost. For catalog items, quantities use the item's packLevels units like a count (e.g. '6 boxes'); anything in needsUnit was not saved — ask which unit was meant and record it again. Things not in the inventory catalog (one-offs) are saved as said and listed in notInCatalog — tell the user, in case one was meant to be a catalog item. cost is the line total off the receipt; ask for it, since the monthly page only adds up entered costs. Buying an item also closes its open buy-list entries. A line matching one already logged (same date, store, item, quantity) is skipped as a likely repeat; if it really was bought twice, confirm with the user and record it again with allowDuplicate.",
         inputSchema: z.object({
           date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe("Purchase date as YYYY-MM-DD. Defaults to today."),
           store: z.string().min(1).describe("Where it was bought, e.g. 'costco'"),
           items: z
             .array(
               z.object({
-                item: z.string().describe("Item name as it appears in the inventory catalog"),
+                item: z.string().describe("Catalog item name, or what was bought if it's a one-off"),
                 quantity: z.string().describe("Amount in the item's units, e.g. '6 boxes'"),
-                cost: z.number().nonnegative().optional().describe("Line total in dollars, if known"),
+                cost: z.number().nonnegative().optional().describe("Line total in dollars off the receipt"),
               }),
             )
             .min(1),
@@ -292,7 +291,7 @@ const mcpHandler = createMcpHandler(
       async ({ date, store, items, allowDuplicate }) => {
         const [catalog, buyListRows, existing] = await Promise.all([getCatalog(), getBuyListRows(), getPurchases()]);
         const targetDate = date ?? todayISO();
-        const { matched, unrecognized, needsUnit } = resolveLines(catalog, items);
+        const { matched, notInCatalog, needsUnit } = resolveLines(catalog, items);
         const { rows, skippedAsRepeat, close } = planPurchase(
           catalog,
           existing,
@@ -308,7 +307,7 @@ const mcpHandler = createMcpHandler(
         return result({
           date: targetDate,
           written: rows.map((r) => r.item),
-          unrecognized,
+          ...(notInCatalog.length > 0 && { notInCatalog }),
           ...(needsUnit.length > 0 && { needsUnit }),
           ...(skippedAsRepeat.length > 0 && { skippedAsRepeat }),
           ...(close.length > 0 && { closedOnBuyList: close.map((r) => r.item) }),
@@ -321,28 +320,30 @@ const mcpHandler = createMcpHandler(
       {
         title: "Add to buy list",
         description:
-          "Put eyeballed items on the buy list (e.g. 'we're low on napkins'). No count needed. Items must be in the catalog so a later record_purchase can close them; anything else comes back in unrecognized — check list_inventory_items, or add it with add_inventory_item if it's genuinely new. Items already open on the list are skipped.",
+          "Put things on the buy list (e.g. 'we're low on napkins', 'get a new blender pitcher'). No count needed. Catalog items are saved with the catalog's spelling; anything else is saved as said and listed in notInCatalog — tell the user, in case one was meant to be a catalog item. Items already open on the list are skipped. Logging the purchase later with record_purchase closes them.",
         inputSchema: z.object({
           items: z.array(z.string().min(1)).min(1).describe("Item names, e.g. ['napkins', 'dish soap']"),
         }),
       },
       async ({ items }) => {
         const [catalog, buyListRows] = await Promise.all([getCatalog(), getBuyListRows()]);
-        const open = new Set(buyListRows.filter((r) => !r.done).map((r) => findCatalogItem(catalog, r.item)?.item ?? r.item));
+        const nameOf = (raw: string) => findCatalogItem(catalog, raw)?.item ?? raw.trim();
+        const open = new Set(buyListRows.filter((r) => !r.done).map((r) => nameOf(r.item).toLowerCase()));
         const added: string[] = [];
         const alreadyOnList: string[] = [];
-        const unrecognized: string[] = [];
+        const notInCatalog: string[] = [];
         for (const raw of items) {
-          const match = findCatalogItem(catalog, raw);
-          if (!match) unrecognized.push(raw);
-          else if (open.has(match.item)) alreadyOnList.push(match.item);
-          else {
-            added.push(match.item);
-            open.add(match.item);
+          const name = nameOf(raw);
+          if (open.has(name.toLowerCase())) {
+            alreadyOnList.push(name);
+            continue;
           }
+          added.push(name);
+          open.add(name.toLowerCase());
+          if (!findCatalogItem(catalog, raw)) notInCatalog.push(name);
         }
         if (added.length > 0) await addToBuyList(added, todayISO());
-        return result({ added, alreadyOnList, unrecognized });
+        return result({ added, alreadyOnList, ...(notInCatalog.length > 0 && { notInCatalog }) });
       },
     );
 
@@ -351,12 +352,12 @@ const mcpHandler = createMcpHandler(
       {
         title: "Get buy list",
         description:
-          "What to buy now: weekly-counted items below par (with how many whole packs gets them back to par), plus eyeballed items added by hand, each with its supplier. Also lists weekly items never counted and anything that needs fixing in the sheet.",
+          "What to buy now: items whose latest count (plus purchases since) is under their threshold, with that count and its date, plus things added by hand, each with its supplier. Also lists anything that needs fixing in the sheet.",
         inputSchema: z.object({}),
       },
       async () => {
-        const { list, unknownAItems } = await loadBuyList();
-        return result({ ...list, ...(unknownAItems.length > 0 && { aItemsNotInCatalog: unknownAItems }) });
+        const { list } = await loadBuyList();
+        return result(list);
       },
     );
   },

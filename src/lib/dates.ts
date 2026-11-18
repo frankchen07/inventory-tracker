@@ -15,6 +15,10 @@ export function addDays(date: string, days: number): string {
   return isoDate(d);
 }
 
+export function shortDate(date: string): string {
+  return parseDate(date).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
 // Rounded, since a span crossing a DST change is an hour off a whole day.
 export function daysBetween(from: string, to: string): number {
   return Math.round((parseDate(to).getTime() - parseDate(from).getTime()) / 86_400_000);

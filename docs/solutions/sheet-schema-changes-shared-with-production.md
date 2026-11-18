@@ -18,9 +18,9 @@ branch shipped:
   existing date header.
 
 ## The solution / decision
-Make sheet schema changes additive: new tabs (`a items`, `purchases`, `buy list`), which
-`main` never reads. Listing an item in `a items` is what makes it weekly-counted. Its par reuses
-the existing `threshold` column, so no column moved. Snapshot `getInventorySnapshot()` to JSON
+Make sheet schema changes additive: new tabs (`purchases`, `buy list`), which `main` never reads.
+An `a items` tab (`item | unitCost`) was used the same way, then dropped on 2026-11-17 when frank
+chose to work off `inventory` alone; `threshold` stays the running-low line, so no column moved. Snapshot `getInventorySnapshot()` to JSON
 before and after any live sheet write, and `cmp` the two.
 
 Related convention, decided in the same work: `computeBuyList` adds purchases dated on or after an

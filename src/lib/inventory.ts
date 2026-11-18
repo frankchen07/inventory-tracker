@@ -1,8 +1,6 @@
 import {
   CATALOG_SHEET,
   CATALOG_HEADERS,
-  A_ITEMS_SHEET,
-  A_ITEMS_HEADERS,
   PURCHASES_SHEET,
   PURCHASES_HEADERS,
   BUY_LIST_SHEET,
@@ -15,14 +13,12 @@ import {
   writeRow,
 } from "@/lib/sheets";
 import { parseConversion, parseReportedQuantity, parseThresholdQuantity } from "@/lib/unit-conversion";
-import { daysBetween } from "@/lib/dates";
 import type {
   BuyList,
   BuyListRow,
   CatalogItem,
   MonthSpend,
   PurchaseRow,
-  StaleCountItem,
 } from "@/lib/types";
 
 export async function getCatalog(): Promise<CatalogItem[]> {
@@ -84,23 +80,6 @@ function parseMoney(raw: string): number | null {
   return raw.trim() === "" || Number.isNaN(n) ? null : n;
 }
 
-// Keyed by the catalog's own spelling. Names that match no catalog item come
-// back in `unknown` so a typo in the tab shows up instead of quietly
-// dropping an item from the weekly count.
-export async function getAItems(
-  catalog: CatalogItem[],
-): Promise<{ aItems: Map<string, number | null>; unknown: string[] }> {
-  const rows = await readRows(A_ITEMS_SHEET, A_ITEMS_HEADERS);
-  const aItems = new Map<string, number | null>();
-  const unknown: string[] = [];
-  for (const r of rows) {
-    const match = findCatalogItem(catalog, r.item);
-    if (match) aItems.set(match.item, parseMoney(r.unitCost));
-    else unknown.push(r.item);
-  }
-  return { aItems, unknown };
-}
-
 export async function getPurchases(): Promise<PurchaseRow[]> {
   const rows = await readRows(PURCHASES_SHEET, PURCHASES_HEADERS);
   return rows.map((r) => ({ date: r.date, store: r.store, item: r.item, quantity: r.quantity, cost: parseMoney(r.cost) }));
@@ -130,24 +109,6 @@ export async function markBought(rows: BuyListRow[]): Promise<void> {
 
 export const STALE_AFTER_DAYS = 7;
 
-// Counts carry forward, so an item skipped for weeks still shows its old
-// number as if current — this is what surfaces it. Never-counted items stay
-// out; computeBuyList lists those separately.
-export function computeStaleCounts(
-  catalog: CatalogItem[],
-  countDates: Map<string, string | null>,
-  today: string,
-): StaleCountItem[] {
-  return catalog
-    .flatMap((c) => {
-      const lastCounted = countDates.get(c.item);
-      if (!lastCounted) return [];
-      const daysAgo = daysBetween(lastCounted, today);
-      return daysAgo >= STALE_AFTER_DAYS ? [{ item: c.item, lastCounted, daysAgo }] : [];
-    })
-    .sort((a, b) => b.daysAgo - a.daysAgo);
-}
-
 // Writes a new (or updates an existing) date column. `valuesByItem` should
 // only contain items actually recounted this time — every other cell is left
 // as-is, so readLatestValues() carries the prior value forward at read time
@@ -165,85 +126,56 @@ export async function writeCountColumn(
   await writeCells(colIndex, cells);
 }
 
-// Any count in an item's own units, as top-level packs (boxes, bottles) —
-// the unit things are bought and priced in.
-export function toPacks(text: string, unitConversion: string): number | null {
-  const levels = parseConversion(unitConversion);
-  if (levels.length === 0) return null;
-  const atomic = parseReportedQuantity(text, levels);
-  return atomic === null ? null : atomic / levels[0].perAtomic;
-}
-
 const sameItem = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 
-// threshold is the par for A items: the level to buy back up to, in whole
-// packs since that's how things are bought. Purchases dated on or after an
-// item's last count are added to it, so logging a purchase takes the item off
-// the list until the next count.
+// threshold is the running-low line: an item shows when its last count plus
+// anything bought on or after that count's day is under it. Items with no
+// count or no threshold just don't show, since not everything gets counted.
 export function computeBuyList(
   catalog: CatalogItem[],
   counts: Map<string, string>,
   countDates: Map<string, string | null>,
-  aItems: Map<string, number | null>,
   buyListRows: BuyListRow[],
   purchases: PurchaseRow[],
 ): BuyList {
-  const list: BuyList = { toBuy: [], handAdded: [], notCounted: [], needsReview: [] };
+  const list: BuyList = { low: [], handAdded: [], needsReview: [] };
 
   for (const c of catalog) {
-    if (!aItems.has(c.item)) continue;
     const countText = counts.get(c.item) ?? "";
     const countDate = countDates.get(c.item);
-    if (countText === "" || !countDate) {
-      list.notCounted.push(c.item);
-      continue;
-    }
+    if (countText === "" || !countDate || c.threshold.trim() === "") continue;
     const levels = parseConversion(c.unitConversion);
     const counted = parseReportedQuantity(countText, levels);
     if (counted === null) {
       list.needsReview.push({ item: c.item, problem: `can't read the count "${countText}"` });
       continue;
     }
+    const threshold = parseThresholdQuantity(c.threshold, levels);
+    if (threshold === null) {
+      list.needsReview.push({ item: c.item, problem: `can't read the threshold "${c.threshold}"` });
+      continue;
+    }
     const since = purchases.filter((p) => sameItem(p.item, c.item) && p.date >= countDate);
-    const boughtAtomic = since.map((p) => parseReportedQuantity(p.quantity, levels));
-    if (boughtAtomic.includes(null)) {
+    const bought = since.map((p) => parseReportedQuantity(p.quantity, levels));
+    if (bought.includes(null)) {
       list.needsReview.push({ item: c.item, problem: "can't read a purchase quantity since the last count" });
       continue;
     }
-    if (c.threshold.trim() === "") {
-      list.needsReview.push({ item: c.item, problem: "no par set (threshold column)" });
-      continue;
-    }
-    const par = parseThresholdQuantity(c.threshold, levels);
-    if (par === null) {
-      list.needsReview.push({ item: c.item, problem: `can't read the par "${c.threshold}"` });
-      continue;
-    }
-    const bought = (boughtAtomic as number[]).reduce((a, b) => a + b, 0);
-    const onHand = counted + bought;
-    // Float dust from fractional packs must not round up to an extra pack.
-    const buy = Math.ceil((par - onHand) / levels[0].perAtomic - 1e-9);
-    if (buy > 0) {
-      list.toBuy.push({
-        item: c.item,
-        supplier: c.supplier,
-        onHand: countText,
-        boughtSince: bought / levels[0].perAtomic,
-        buy,
-        unit: levels[0].unit,
-      });
+    const onHand = counted + (bought as number[]).reduce((a, b) => a + b, 0);
+    if (onHand < threshold) {
+      list.low.push({ item: c.item, supplier: c.supplier, countText, countDate, boughtSince: since.map((p) => p.quantity.trim()) });
     }
   }
 
-  const listed = new Set([...aItems.keys()].map((i) => i.toLowerCase()));
+  // Items already showing as low aren't repeated; repeats of a name show once.
+  const listed = new Set(list.low.map((l) => l.item.toLowerCase()));
   for (const row of buyListRows) {
     if (row.done) continue;
     const match = findCatalogItem(catalog, row.item);
     const name = match?.item ?? row.item.trim();
-    // A items are already handled by their count; repeats show once.
     if (listed.has(name.toLowerCase())) continue;
     listed.add(name.toLowerCase());
-    list.handAdded.push({ item: name, supplier: match?.supplier ?? "" });
+    list.handAdded.push({ item: name, supplier: match?.supplier ?? "", added: row.added, inCatalog: match !== undefined });
   }
   return list;
 }
@@ -251,7 +183,8 @@ export function computeBuyList(
 // Lines already logged with the same date, store, item and quantity are
 // skipped as likely retries unless allowDuplicate. Buy-list rows close for
 // every bought item, skipped ones included, so a retry after a failed close
-// still finishes it. `lines` must already be resolved to catalog names.
+// still finishes it. Catalog items in `lines` must already use the catalog's
+// spelling; anything else is matched to buy-list rows ignoring case.
 export function planPurchase(
   catalog: CatalogItem[],
   existing: PurchaseRow[],
@@ -281,36 +214,22 @@ export function planPurchase(
       cost: l.cost === undefined ? "" : String(l.cost),
       notes: "",
     }));
-  const bought = new Set(lines.map((l) => l.item));
-  const close = buyListRows.filter((r) => !r.done && bought.has(findCatalogItem(catalog, r.item)?.item ?? r.item));
+  const key = (name: string) => name.trim().toLowerCase();
+  const bought = new Set(lines.map((l) => key(l.item)));
+  const close = buyListRows.filter((r) => !r.done && bought.has(key(findCatalogItem(catalog, r.item)?.item ?? r.item)));
   return { rows, skippedAsRepeat, close };
 }
 
 export async function loadBuyList() {
   const [snapshot, buyListRows, purchases] = await Promise.all([getInventorySnapshot(), getBuyListRows(), getPurchases()]);
-  const { aItems, unknown } = await getAItems(snapshot.catalog);
-  const list = computeBuyList(snapshot.catalog, snapshot.counts, snapshot.countDates, aItems, buyListRows, purchases);
-  return { ...snapshot, aItems, unknownAItems: unknown, list };
+  const list = computeBuyList(snapshot.catalog, snapshot.counts, snapshot.countDates, buyListRows, purchases);
+  return { ...snapshot, list };
 }
 
-// The calendar month's receipts: each line at its receipt cost, else packs x
-// the item's unitCost, else counted as unpriced. Shelf value is each A item's
-// last count in or before the month, at unitCost.
-export function computeMonthSpend(
-  catalog: CatalogItem[],
-  aItems: Map<string, number | null>,
-  purchases: PurchaseRow[],
-  history: Map<string, { date: string; value: string }[]>,
-  month: string,
-): MonthSpend {
-  const result: MonthSpend = {
-    spend: 0,
-    runs: 0,
-    unpricedPurchases: 0,
-    byStore: [],
-    byItem: [],
-    shelf: { date: null, value: 0, unpricedItems: [] },
-  };
+// The calendar month's receipts. Lines with no cost entered are counted as
+// unpriced, not guessed.
+export function computeMonthSpend(catalog: CatalogItem[], purchases: PurchaseRow[], month: string): MonthSpend {
+  const result: MonthSpend = { spend: 0, runs: 0, unpricedPurchases: 0, byStore: [], byItem: [] };
   const stores = new Map<string, { store: string; spend: number; unpriced: number }>();
   const items = new Map<string, { item: string; spend: number; unpriced: number }>();
   const runs = new Set<string>();
@@ -319,42 +238,24 @@ export function computeMonthSpend(
     if (!p.date.startsWith(month)) continue;
     const storeKey = p.store.trim().toLowerCase();
     runs.add(`${p.date}|${storeKey}`);
-    const match = findCatalogItem(catalog, p.item);
-    const name = match?.item ?? p.item.trim();
+    const name = findCatalogItem(catalog, p.item)?.item ?? p.item.trim();
     const store = stores.get(storeKey) ?? { store: p.store.trim(), spend: 0, unpriced: 0 };
-    const line = items.get(name) ?? { item: name, spend: 0, unpriced: 0 };
+    const line = items.get(name.toLowerCase()) ?? { item: name, spend: 0, unpriced: 0 };
     stores.set(storeKey, store);
-    items.set(name, line);
+    items.set(name.toLowerCase(), line);
 
-    let value = p.cost;
-    if (value === null && match) {
-      const unitCost = aItems.get(match.item) ?? null;
-      const packs = toPacks(p.quantity, match.unitConversion);
-      if (unitCost !== null && packs !== null) value = packs * unitCost;
-    }
-    if (value === null) {
+    if (p.cost === null) {
       result.unpricedPurchases++;
       store.unpriced++;
       line.unpriced++;
     } else {
-      result.spend += value;
-      store.spend += value;
-      line.spend += value;
+      result.spend += p.cost;
+      store.spend += p.cost;
+      line.spend += p.cost;
     }
   }
   result.runs = runs.size;
   result.byStore = [...stores.values()].sort((a, b) => b.spend - a.spend);
   result.byItem = [...items.values()].sort((a, b) => b.spend - a.spend);
-
-  for (const c of catalog) {
-    if (!aItems.has(c.item)) continue;
-    const last = (history.get(c.item) ?? []).filter((h) => h.date.slice(0, 7) <= month).at(-1);
-    if (!last) continue;
-    if (!result.shelf.date || last.date > result.shelf.date) result.shelf.date = last.date;
-    const unitCost = aItems.get(c.item) ?? null;
-    const packs = toPacks(last.value, c.unitConversion);
-    if (unitCost === null || packs === null) result.shelf.unpricedItems.push(c.item);
-    else result.shelf.value += packs * unitCost;
-  }
   return result;
 }

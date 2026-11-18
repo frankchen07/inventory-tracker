@@ -33,21 +33,24 @@ Six core tabs, each a flat table with a header row (no numeric IDs — everythin
 - **reserve stock** — target on-hand levels for whichever products or recipes you keep a
   buffer of, shaped like `inventory` (fixed columns + one date column per physical count).
 
-Three more tabs track the money side of `inventory`. They're separate tabs because every column after
-`threshold` on `inventory` is read as a count date:
+Two more tabs track buying. They're separate tabs because every column after `threshold` on
+`inventory` is read as a count date. Both are filled in by hand, by voice or typed into the sheet:
 
-- **a items** — `item | unitCost`. The items counted weekly; everything else is eyeballed. For these,
-  `threshold` is the par (the level to buy back up to) and `unitCost` is dollars per top-level pack.
-- **purchases** — `date | store | item | quantity | cost | notes`, one row per item bought.
-- **buy list** — `item | added | done`, eyeballed items flagged by hand.
+- **purchases** — `date | store | item | quantity | cost | notes`, one row per item bought. `item`
+  can be a catalog item or a one-off; `cost` is the line total off the receipt.
+- **buy list** — `item | added | done`, things someone flagged to buy (catalog items or one-offs);
+  `done` turns TRUE when a purchase of that item is logged.
+
+Not every item gets counted. `threshold` on `inventory` is the running-low line: an item shows on
+the buy list once its latest count, plus purchases logged on or after that count's day, is under it.
 
 ## Using it
 
-- **`/`** — buy list: A items below par with how many whole packs to buy, plus hand-added items,
-  grouped by supplier; then A items never counted, not counted in 7+ days, or needing a fix.
+- **`/`** — buy list: items under their threshold (with their last count and its date) and items
+  added by hand, grouped by supplier; then anything needing a fix in the sheet.
 - **`/month`** — the calendar month's receipts: total spent and number of runs, by store and by
-  item (receipt cost if entered, else packs × `unitCost`), plus A items' shelf value at the last
-  count. Deliberately no "used" or waste math. `?month=YYYY-MM` for other months.
+  item. Lines with no cost entered are counted as "no price". Deliberately no "used" or waste
+  math. `?month=YYYY-MM` for other months.
 - **`/production`** — this week's plan as four steps: what's due from Wednesday through the
   following Tuesday (popup, deliveries, catering), what that takes from reserves, what orders still
   need made Mon/Tue, and how far reserves could be refilled (optional, your call). Counts are taken
@@ -69,10 +72,10 @@ Its main tool, `record_inventory_count(date?, counts: {item, count}[])`, matches
 against the live catalog (case-insensitive) and calls `writeCountColumn`, so counted items land in
 a dated column and everything else carries forward. Unrecognized item names are reported back
 instead of guessed, and a count 3x or more off the previous one comes back in `checkThese` for
-Claude to read back. The others: `list_inventory_items` (flags `aItem` for the weekly
-count), `update_item_threshold`, `add_inventory_item`, `add_order` (a dated one-off order into
-`a la carte orders`, with the item matched to an exact product or recipe name), `record_purchase`
-(also closes matching buy-list entries), `add_to_buy_list`, and `get_buy_list`.
+Claude to read back. The others: `list_inventory_items`, `update_item_threshold`,
+`add_inventory_item`, `add_order` (a dated one-off order into `a la carte orders`, with the item
+matched to an exact product or recipe name), `record_purchase` (also closes matching buy-list
+entries), `add_to_buy_list`, and `get_buy_list`.
 
 The route enforces its own auth (a bearer token checked against `MCP_ACCESS_TOKEN`) rather than
 the app's cookie-based passphrase gate, since an MCP client can't hold a browser cookie —

@@ -11,12 +11,6 @@ export interface CatalogItem {
 }
 
 // A catalog item currently below its threshold.
-export interface StaleCountItem {
-  item: string;
-  lastCounted: string;
-  daysAgo: number;
-}
-
 // "purchases" tab row. quantity is in the item's own units like a count;
 // cost is the receipt total for the line, null when not entered.
 export interface PurchaseRow {
@@ -35,35 +29,30 @@ export interface BuyListRow {
   rowIndex: number;
 }
 
-// An A item below par: buy `buy` whole top-level packs (`unit`) to get back to it.
-// onHand is the last count's text; boughtSince is packs bought after it.
-export interface BuyLine {
+// An item under its threshold. countText/countDate are its last count;
+// boughtSince lists purchase quantities logged on or after that day.
+export interface LowItem {
   item: string;
   supplier: string;
-  onHand: string;
-  boughtSince: number;
-  buy: number;
-  unit: string;
+  countText: string;
+  countDate: string;
+  boughtSince: string[];
 }
 
 export interface BuyList {
-  toBuy: BuyLine[];
-  handAdded: { item: string; supplier: string }[];
-  notCounted: string[];
+  low: LowItem[];
+  handAdded: { item: string; supplier: string; added: string; inCatalog: boolean }[];
   needsReview: { item: string; problem: string }[];
 }
 
-// The calendar month's receipts. Lines with no receipt cost use packs x
-// unitCost; lines with neither are counted in `unpriced`, not guessed.
+// The calendar month's receipts; lines with no cost entered are counted in
+// `unpriced`, not guessed.
 export interface MonthSpend {
   spend: number;
   runs: number;
   unpricedPurchases: number;
   byStore: { store: string; spend: number; unpriced: number }[];
   byItem: { item: string; spend: number; unpriced: number }[];
-  // A items' value at their last count in or before the month; date is the
-  // latest of those counts, null if none.
-  shelf: { date: string | null; value: number; unpricedItems: string[] };
 }
 
 // "recipes" sheet: a batch process (brewing, roasting) and what it yields.
