@@ -1,10 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { computeBuyList, computeMonthSpend, findCatalogItem, planPurchase } from "@/lib/inventory";
+import { catalogColumns, computeBuyList, computeMonthSpend, findCatalogItem, parseInventoryGrid, planPurchase } from "@/lib/inventory";
 import type { CatalogItem } from "@/lib/types";
 
 const item = (name: string, rowIndex: number): CatalogItem => ({
   item: name,
+  location: "",
   category: "",
   supplier: "",
   unitConversion: "",
@@ -145,4 +146,55 @@ test("computeMonthSpend totals the calendar month's receipt costs by store and i
 test("computeMonthSpend with no purchases in the month", () => {
   const m = computeMonthSpend([], [], "2026-09");
   assert.deepEqual(m, { spend: 0, runs: 0, unpricedPurchases: 0, byStore: [], byItem: [] });
+});
+
+test("parseInventoryGrid finds columns by header name, so a location column can sit anywhere", () => {
+  const today = [
+    ["item", "category", "supplier", "unit conversion", "threshold", "2026-10-15", "2026-11-24"],
+    ["oat milk", "milk", "costco", "1 box has 6 cartons", "4 boxes", "12 boxes", ""],
+    [],
+    ["lids", "cups", "costco", "1 box", "1 box", "", "2 boxes"],
+  ];
+  const withLocation = [
+    ["item", "location", "category", "supplier", "unit conversion", "threshold", "notes", "", "2026-10-15", "2026-11-24"],
+    ["oat milk", "walk-in", "milk", "costco", "1 box has 6 cartons", "4 boxes", "ask Dana", "", "12 boxes", ""],
+    [],
+    ["lids", "front shelf", "cups", "costco", "1 box", "1 box", "", "", "", "2 boxes"],
+  ];
+  const a = parseInventoryGrid(today);
+  const b = parseInventoryGrid(withLocation);
+
+  assert.deepEqual(a.catalog[0], {
+    item: "oat milk",
+    location: "",
+    category: "milk",
+    supplier: "costco",
+    unitConversion: "1 box has 6 cartons",
+    threshold: "4 boxes",
+    rowIndex: 2,
+  });
+  assert.deepEqual(b.catalog[0], { ...a.catalog[0], location: "walk-in" });
+  assert.deepEqual(b.catalog[1], { ...a.catalog[1], location: "front shelf" });
+  for (const { catalog, latest } of [a, b]) {
+    assert.deepEqual(catalog.map((c) => [c.item, c.rowIndex]), [["oat milk", 2], ["lids", 4]]);
+    assert.equal(latest.valueAtRow(2), "12 boxes");
+    assert.equal(latest.dateAtRow(2), "2026-10-15");
+    assert.equal(latest.valueAtRow(4), "2 boxes");
+    assert.equal(latest.latestDate, "2026-11-24");
+  }
+});
+
+test("parseInventoryGrid needs an item column", () => {
+  assert.throws(() => parseInventoryGrid([["name", "threshold"], ["oat milk", "1 box"]]), /"item" header/);
+});
+
+test("catalogColumns maps header names to positions", () => {
+  assert.deepEqual(catalogColumns(["item", "location", "category", "supplier", "Unit Conversion", "threshold", "2026-10-15"]), {
+    item: 0,
+    location: 1,
+    category: 2,
+    supplier: 3,
+    unitConversion: 4,
+    threshold: 5,
+  });
 });

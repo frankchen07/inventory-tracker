@@ -32,6 +32,13 @@ and was dropped on 2026-11-17 for receipts only (`computeMonthSpend`). Frank's r
 CEO looks at dollars and what's running out, not quantities used, and waste is too small to
 measure.
 
+Update, 2026-11-18: `inventory` is now read by header name (`parseInventoryGrid`,
+`catalogColumns`, `dateColumnFor`). Any `YYYY-MM-DD` header is a count column, and new counts go
+just past the last used header. That made the `location` column insert safe. The order still
+mattered: the header-name code was deployed to `main` and confirmed live *before* the column went
+in. The other tabs (`recipes`, `products`, orders, `reserve stock`, `purchases`, `a la buy list`)
+are still read by position.
+
 ## Why it wasn't obvious
 - Code changes reach production only through merge and deploy. Sheet changes reach it instantly.
   A branch's "schema migration" is really a production change.

@@ -2,13 +2,13 @@ import { google, sheets_v4 } from "googleapis";
 
 const SPREADSHEET_ID = process.env.GOOGLE_SHEETS_SPREADSHEET_ID!;
 
-// "inventory" is the single source of truth: columns A-E are the fixed
-// catalog (item, category, supplier, unit conversion, threshold), and every
-// column from F onward is a date-headered count column, oldest to newest
-// left to right. There is no separate history tab — a recorded count *is* a
-// new column here.
+// "inventory" is the single source of truth: catalog columns (item,
+// location, category, supplier, unit conversion, threshold) plus one
+// YYYY-MM-DD-headered count column per physical count. There is no separate
+// history tab — a recorded count *is* a new column here. Unlike the tabs
+// below, it's read by header name (parseInventoryGrid in inventory.ts), so
+// columns can be added or moved without a code change.
 export const CATALOG_SHEET = "inventory";
-export const CATALOG_HEADERS = ["item", "category", "supplier", "unitConversion", "threshold"] as const;
 
 // Production planning tabs. Frank creates these by hand with the header row
 // already in place. readRows maps columns by position, not by name, so each
@@ -142,28 +142,24 @@ export async function appendRows<H extends readonly string[]>(
   return first;
 }
 
-export interface DateColumn {
-  date: string;
-  colIndex: number;
+// The whole tab, header row first, for tabs read by header name.
+export async function readGrid(sheetName: string): Promise<unknown[][]> {
+  const res = await getClient().spreadsheets.values.get({ spreadsheetId: SPREADSHEET_ID, range: `${sheetName}!A1:ZZ` });
+  return res.data.values ?? [];
 }
 
-// Date columns start right after a sheet's fixed catalog columns and run
-// left-to-right, oldest first. Defaults match "inventory" (index
-// CATALOG_HEADERS.length, i.e. column F); pass sheetName/fixedColumnCount to
-// reuse this against another sheet shaped the same way, e.g. "reserve stock".
-export async function listDateColumns(
-  sheetName: string = CATALOG_SHEET,
-  fixedColumnCount: number = CATALOG_HEADERS.length,
-): Promise<DateColumn[]> {
-  const startCol = columnLetter(fixedColumnCount);
-  const res = await getClient().spreadsheets.values.get({
-    spreadsheetId: SPREADSHEET_ID,
-    range: `${sheetName}!${startCol}1:ZZ1`,
-  });
-  const headerRow = res.data.values?.[0] ?? [];
-  return headerRow
-    .map((date, i) => ({ date: String(date ?? ""), colIndex: fixedColumnCount + i }))
-    .filter((c) => c.date !== "");
+export async function readHeaderRow(sheetName: string): Promise<unknown[]> {
+  const res = await getClient().spreadsheets.values.get({ spreadsheetId: SPREADSHEET_ID, range: `${sheetName}!A1:ZZ1` });
+  return res.data.values?.[0] ?? [];
+}
+
+// A date's existing column, or a new one just past the last used header —
+// wherever the catalog columns end.
+export function dateColumnFor(headerRow: unknown[], date: string): { colIndex: number; isNew: boolean } {
+  const existing = headerRow.findIndex((h) => String(h ?? "").trim() === date);
+  if (existing !== -1) return { colIndex: existing, isNew: false };
+  const lastUsed = headerRow.reduce<number>((last, h, i) => (String(h ?? "").trim() === "" ? last : i), -1);
+  return { colIndex: lastUsed + 1, isNew: true };
 }
 
 export interface LatestValues {
@@ -211,25 +207,19 @@ export async function readLatestValues(sheetName: string, fixedColumnCount: numb
   return mergeDateColumns(res.data.values ?? []);
 }
 
-// Finds the column for a given date, creating it (as a new header cell one
-// past the last existing date column) if it doesn't exist yet.
-export async function getOrCreateDateColumn(
-  date: string,
-  sheetName: string = CATALOG_SHEET,
-  fixedColumnCount: number = CATALOG_HEADERS.length,
-): Promise<number> {
-  const cols = await listDateColumns(sheetName, fixedColumnCount);
-  const existing = cols.find((c) => c.date === date);
-  if (existing) return existing.colIndex;
-
-  const nextIndex = fixedColumnCount + cols.length;
-  await getClient().spreadsheets.values.update({
-    spreadsheetId: SPREADSHEET_ID,
-    range: `${sheetName}!${columnLetter(nextIndex)}1`,
-    valueInputOption: "USER_ENTERED",
-    requestBody: { values: [[date]] },
-  });
-  return nextIndex;
+// Finds the column for a given date, creating its header cell if it doesn't
+// exist yet.
+export async function getOrCreateDateColumn(date: string, sheetName: string = CATALOG_SHEET): Promise<number> {
+  const { colIndex, isNew } = dateColumnFor(await readHeaderRow(sheetName), date);
+  if (isNew) {
+    await getClient().spreadsheets.values.update({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${sheetName}!${columnLetter(colIndex)}1`,
+      valueInputOption: "USER_ENTERED",
+      requestBody: { values: [[date]] },
+    });
+  }
+  return colIndex;
 }
 
 export interface RowCell {

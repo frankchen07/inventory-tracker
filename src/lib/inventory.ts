@@ -1,6 +1,5 @@
 import {
   CATALOG_SHEET,
-  CATALOG_HEADERS,
   PURCHASES_SHEET,
   PURCHASES_HEADERS,
   BUY_LIST_SHEET,
@@ -8,10 +7,13 @@ import {
   appendRows,
   readRows,
   getOrCreateDateColumn,
-  readLatestValues,
+  mergeDateColumns,
+  readGrid,
+  readHeaderRow,
   writeCells,
   writeRow,
 } from "@/lib/sheets";
+import type { LatestValues } from "@/lib/sheets";
 import { parseConversion, parseReportedQuantity, parseThresholdQuantity } from "@/lib/unit-conversion";
 import type {
   BuyList,
@@ -21,16 +23,56 @@ import type {
   PurchaseRow,
 } from "@/lib/types";
 
+const CATALOG_FIELDS = ["item", "location", "category", "supplier", "unitConversion", "threshold"] as const;
+type CatalogField = (typeof CATALOG_FIELDS)[number];
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+// Header text to column index, ignoring case and spaces ("unit conversion"
+// is unitConversion). Columns the app doesn't know are left alone.
+export function catalogColumns(headerRow: unknown[]): Partial<Record<CatalogField, number>> {
+  const cols: Partial<Record<CatalogField, number>> = {};
+  headerRow.forEach((header, i) => {
+    const key = String(header ?? "").replace(/\s+/g, "").toLowerCase();
+    const field = CATALOG_FIELDS.find((f) => f.toLowerCase() === key);
+    if (field && cols[field] === undefined) cols[field] = i;
+  });
+  return cols;
+}
+
+// Reads "inventory" by header name: catalog fields wherever they sit, and
+// every YYYY-MM-DD header as a count column. rowIndex is the real sheet row,
+// which is what lines an item up with its counts.
+export function parseInventoryGrid(grid: unknown[][]): { catalog: CatalogItem[]; latest: LatestValues } {
+  const [headerRow = [], ...rows] = grid;
+  const cols = catalogColumns(headerRow);
+  if (cols.item === undefined) throw new Error(`The inventory tab has no "item" header.`);
+  const cell = (row: unknown[] | undefined, field: CatalogField) => {
+    const i = cols[field];
+    return i === undefined ? "" : String(row?.[i] ?? "");
+  };
+
+  const catalog = rows.flatMap((row, r) =>
+    cell(row, "item").trim() === ""
+      ? []
+      : [
+          {
+            item: cell(row, "item"),
+            location: cell(row, "location"),
+            category: cell(row, "category"),
+            supplier: cell(row, "supplier"),
+            unitConversion: cell(row, "unitConversion"),
+            threshold: cell(row, "threshold"),
+            rowIndex: r + 2,
+          },
+        ],
+  );
+  const dateCols = headerRow.flatMap((h, i) => (ISO_DATE.test(String(h ?? "").trim()) ? [i] : []));
+  const latest = mergeDateColumns([dateCols.map((i) => headerRow[i]), ...rows.map((row) => dateCols.map((i) => row?.[i] ?? ""))]);
+  return { catalog, latest };
+}
+
 export async function getCatalog(): Promise<CatalogItem[]> {
-  const rows = await readRows(CATALOG_SHEET, CATALOG_HEADERS);
-  return rows.map((r) => ({
-    item: r.item,
-    category: r.category,
-    supplier: r.supplier,
-    unitConversion: r.unitConversion,
-    threshold: r.threshold,
-    rowIndex: r._rowIndex,
-  }));
+  return parseInventoryGrid(await readGrid(CATALOG_SHEET)).catalog;
 }
 
 export function findCatalogItem(catalog: CatalogItem[], name: string): CatalogItem | undefined {
@@ -39,7 +81,9 @@ export function findCatalogItem(catalog: CatalogItem[], name: string): CatalogIt
 }
 
 export async function writeThreshold(item: CatalogItem, threshold: string): Promise<void> {
-  await writeCells(CATALOG_HEADERS.indexOf("threshold"), [{ rowIndex: item.rowIndex, value: threshold }]);
+  const col = catalogColumns(await readHeaderRow(CATALOG_SHEET)).threshold;
+  if (col === undefined) throw new Error(`The inventory tab has no "threshold" header.`);
+  await writeCells(col, [{ rowIndex: item.rowIndex, value: threshold }]);
 }
 
 // New items go one row past the current last item; date-column cells for
@@ -49,7 +93,11 @@ export async function addCatalogItem(
   record: Omit<CatalogItem, "rowIndex">,
 ): Promise<number> {
   const rowIndex = Math.max(1, ...catalog.map((c) => c.rowIndex)) + 1;
-  await writeRow(CATALOG_SHEET, CATALOG_HEADERS, rowIndex, record);
+  // Lay the record out under each field's header; other columns stay blank.
+  const cols = catalogColumns(await readHeaderRow(CATALOG_SHEET));
+  const last = Math.max(...Object.values(cols));
+  const headers = Array.from({ length: last + 1 }, (_, i) => CATALOG_FIELDS.find((f) => cols[f] === i) ?? "");
+  await writeRow(CATALOG_SHEET, headers, rowIndex, record as Record<string, string>);
   return rowIndex;
 }
 
@@ -65,10 +113,7 @@ export interface InventorySnapshot {
 }
 
 export async function getInventorySnapshot(): Promise<InventorySnapshot> {
-  const [catalog, latest] = await Promise.all([
-    getCatalog(),
-    readLatestValues(CATALOG_SHEET, CATALOG_HEADERS.length),
-  ]);
+  const { catalog, latest } = parseInventoryGrid(await readGrid(CATALOG_SHEET));
   const counts = new Map(catalog.map((c) => [c.item, latest.valueAtRow(c.rowIndex)]));
   const countDates = new Map(catalog.map((c) => [c.item, latest.dateAtRow(c.rowIndex)]));
   const history = new Map(catalog.map((c) => [c.item, latest.historyAtRow(c.rowIndex)]));

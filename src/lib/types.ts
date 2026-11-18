@@ -2,6 +2,8 @@
 // name — the sheet has no id column.
 export interface CatalogItem {
   item: string;
+  // Where it sits, so the sheet can be sorted in the order you walk the floor.
+  location: string;
   category: string;
   supplier: string;
   unitConversion: string;

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { cellUpdates, mergeDateColumns, parseRows } from "@/lib/sheets";
+import { cellUpdates, dateColumnFor, mergeDateColumns, parseRows } from "@/lib/sheets";
 
 test("parseRows drops blank rows but keeps each row's real sheet row number", () => {
   const rows = parseRows(
@@ -60,4 +60,11 @@ test("cellUpdates targets only the given rows, so other items in the column are 
     ],
   );
   assert.deepEqual(cellUpdates("inventory", 6, []), []);
+});
+
+test("dateColumnFor reuses a date's column, or opens one after the last used header", () => {
+  const header = ["item", "location", "category", "supplier", "unit conversion", "threshold", "2026-10-15", ""];
+  assert.deepEqual(dateColumnFor(header, "2026-10-15"), { colIndex: 6, isNew: false });
+  assert.deepEqual(dateColumnFor(header, "2026-11-24"), { colIndex: 7, isNew: true });
+  assert.deepEqual(dateColumnFor(["item", "", "threshold"], "2026-11-24"), { colIndex: 3, isNew: true });
 });

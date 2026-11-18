@@ -24,8 +24,10 @@ npm test   # unit tests for unit parsing and production math
 
 Six core tabs, each a flat table with a header row (no numeric IDs — everything is keyed by name):
 
-- **inventory** — the purchased-goods catalog (item, category, supplier, unit conversion,
-  threshold), plus one date column per physical count, oldest to newest.
+- **inventory** — the purchased-goods catalog (item, location, category, supplier, unit
+  conversion, threshold), plus one `YYYY-MM-DD` column per physical count. Read by header name,
+  so columns can be added or moved; sort it with **Data → Sort sheet** (whole rows), never a
+  selected range, or items get separated from their counts.
 - **recipes** — batch processes (brewing, roasting, etc.) and their oz yield per batch.
 - **products** — the countable units you actually order/reserve (a bottle, a keg, a bag size),
   each pointing at the one recipe it's filled from.

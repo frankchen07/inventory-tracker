@@ -124,7 +124,7 @@ const mcpHandler = createMcpHandler(
       {
         title: "List inventory items",
         description:
-          "List every item in the inventory catalog with its category, supplier, unit conversion, restock threshold, and latest recorded count. packLevels are the units the item is counted in, each with how many of the smallest unit it holds — use them to convert what the user says. Use this to find the exact catalog name for an item and to check whether an item already exists before adding it. threshold is the running-low line: the dashboard flags an item once its latest count drops under it. Not every item gets counted — only record what was actually counted.",
+          "List every item in the inventory catalog with its category, supplier, unit conversion, restock threshold, and latest recorded count. packLevels are the units the item is counted in, each with how many of the smallest unit it holds — use them to convert what the user says. Use this to find the exact catalog name for an item and to check whether an item already exists before adding it. threshold is the running-low line: the dashboard flags an item once its latest count drops under it. Not every item gets counted — only record what was actually counted. Items come in sheet order, which follows location (the order the floor is walked), so go through a count in that order.",
         inputSchema: z.object({}),
       },
       async () => {
@@ -133,6 +133,7 @@ const mcpHandler = createMcpHandler(
           latestDate,
           items: catalog.map((c) => ({
             item: c.item,
+            location: c.location,
             category: c.category,
             supplier: c.supplier,
             unitConversion: c.unitConversion,
@@ -173,9 +174,10 @@ const mcpHandler = createMcpHandler(
       {
         title: "Add inventory item",
         description:
-          "Add a new item to the inventory catalog. Only for items that are genuinely new: call list_inventory_items first and rule out a differently-worded existing item. Confirm the name, category, supplier, and pack size with the user before calling — never guess a supplier or pack size. Reuse an existing category where one fits. Threshold is optional and follows the same format as update_item_threshold. This does not record a count; call record_inventory_count afterwards for that.",
+          "Add a new item to the inventory catalog. Only for items that are genuinely new: call list_inventory_items first and rule out a differently-worded existing item. Confirm the name, category, supplier, and pack size with the user before calling — never guess a supplier or pack size. Reuse an existing category where one fits. Location (where it sits) is optional; reuse an existing location where one fits. Threshold is optional and follows the same format as update_item_threshold. This does not record a count; call record_inventory_count afterwards for that.",
         inputSchema: z.object({
           item: z.string().min(1).describe("Item name, lowercase like the rest of the catalog, e.g. 'oat flour'"),
+          location: z.string().optional().describe("Where it sits, e.g. 'front shelf'"),
           category: z.string().min(1).describe("Existing category where one fits, e.g. 'consumables'"),
           supplier: z.string().min(1).describe("Where it's bought, e.g. 'costco'"),
           unitConversion: z
@@ -185,7 +187,7 @@ const mcpHandler = createMcpHandler(
           threshold: z.string().optional().describe("Restock threshold, e.g. '2 cartons'"),
         }),
       },
-      async ({ item, category, supplier, unitConversion, threshold }) => {
+      async ({ item, location, category, supplier, unitConversion, threshold }) => {
         const catalog = await getCatalog();
         const existing = findCatalogItem(catalog, item);
         if (existing) {
@@ -205,6 +207,7 @@ const mcpHandler = createMcpHandler(
 
         const record = {
           item: item.trim(),
+          location: location?.trim() ?? "",
           category: category.trim(),
           supplier: supplier.trim(),
           unitConversion: unitConversion.trim(),
