@@ -66,11 +66,11 @@ test("computeBuyList flags items under threshold by count alone, noting purchase
     { date: "2026-11-01", store: "costco", item: "napkins", quantity: "a few packs", cost: null },
   ];
   const buyRows = [
-    { item: "napkins", added: "2026-11-14", done: false, rowIndex: 2 },
-    { item: "blender pitcher", added: "2026-11-15", done: false, rowIndex: 3 },
-    { item: "Blender Pitcher", added: "2026-11-16", done: false, rowIndex: 4 },
-    { item: "Dish Soap", added: "2026-11-16", done: false, rowIndex: 5 },
-    { item: "z-folds", added: "2026-11-10", done: true, rowIndex: 6 },
+    { item: "napkins", store: "", added: "2026-11-14", done: false, rowIndex: 2 },
+    { item: "blender pitcher", store: "", added: "2026-11-15", done: false, rowIndex: 3 },
+    { item: "Blender Pitcher", store: "", added: "2026-11-16", done: false, rowIndex: 4 },
+    { item: "Dish Soap", store: "", added: "2026-11-16", done: false, rowIndex: 5 },
+    { item: "z-folds", store: "", added: "2026-11-10", done: true, rowIndex: 6 },
   ];
 
   const list = computeBuyList(catalog, counts, countDates, buyRows, purchases);
@@ -88,13 +88,30 @@ test("computeBuyList flags items under threshold by count alone, noting purchase
   assert.deepEqual(list.needsReview, [{ item: "12 oz pet lid", problem: `can't read the count "3 sleeves of cups"` }]);
 });
 
+test("computeBuyList uses the store typed on the buy list, falling back to the inventory supplier", () => {
+  const catalog = [{ ...item("q-tip pads", 2), supplier: "target" }, { ...item("napkins", 3), supplier: "costco" }];
+  const buyRows = [
+    { item: "trash bags", store: " Costco ", added: "2026-11-18", done: false, rowIndex: 2 },
+    { item: "paper towels", store: "", added: "2026-11-18", done: false, rowIndex: 3 },
+    { item: "Q-Tip Pads", store: "cvs", added: "2026-11-18", done: false, rowIndex: 4 },
+    { item: "napkins", store: "", added: "2026-11-18", done: false, rowIndex: 5 },
+  ];
+  const list = computeBuyList(catalog, new Map(), new Map(), buyRows, []);
+  assert.deepEqual(list.handAdded, [
+    { item: "trash bags", supplier: "Costco", added: "2026-11-18", inCatalog: false },
+    { item: "paper towels", supplier: "", added: "2026-11-18", inCatalog: false },
+    { item: "q-tip pads", supplier: "cvs", added: "2026-11-18", inCatalog: true },
+    { item: "napkins", supplier: "costco", added: "2026-11-18", inCatalog: true },
+  ]);
+});
+
 test("planPurchase skips exact repeats but still closes their buy-list rows, so a retry finishes the job", () => {
   const catalog = [item("napkins", 2), item("oat milk", 3)];
   const existing = [{ date: "2026-11-16", store: "Costco", item: "napkins", quantity: "1 pack", cost: null }];
   const buyRows = [
-    { item: "Napkins", added: "2026-11-14", done: false, rowIndex: 2 },
-    { item: "oat milk", added: "2026-11-14", done: true, rowIndex: 3 },
-    { item: "Blender Pitcher ", added: "2026-11-15", done: false, rowIndex: 4 },
+    { item: "Napkins", store: "", added: "2026-11-14", done: false, rowIndex: 2 },
+    { item: "oat milk", store: "", added: "2026-11-14", done: true, rowIndex: 3 },
+    { item: "Blender Pitcher ", store: "", added: "2026-11-15", done: false, rowIndex: 4 },
   ];
   const lines = [
     { item: "napkins", quantity: "1 pack" },

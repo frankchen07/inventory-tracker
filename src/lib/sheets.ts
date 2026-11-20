@@ -45,9 +45,10 @@ export const RESERVE_STOCK_HEADERS = ["entity", "entityType", "amt", "amtUnit"] 
 export const PURCHASES_SHEET = "purchases";
 export const PURCHASES_HEADERS = ["date", "store", "item", "quantity", "cost", "notes"] as const;
 
-// Eyeballed items someone flagged to buy; done is TRUE once bought.
+// Eyeballed items someone flagged to buy; done is TRUE once bought. store is
+// where to get it; blank falls back to the inventory supplier.
 export const BUY_LIST_SHEET = "a la buy list";
-export const BUY_LIST_HEADERS = ["item", "added", "done"] as const;
+export const BUY_LIST_HEADERS = ["item", "added", "done", "store"] as const;
 
 let client: sheets_v4.Sheets | null = null;
 

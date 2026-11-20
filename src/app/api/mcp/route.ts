@@ -323,12 +323,13 @@ const mcpHandler = createMcpHandler(
       {
         title: "Add to buy list",
         description:
-          "Put things on the buy list (e.g. 'we're low on napkins', 'get a new blender pitcher'). No count needed. Catalog items are saved with the catalog's spelling; anything else is saved as said and listed in notInCatalog — tell the user, in case one was meant to be a catalog item. Items already open on the list are skipped. Logging the purchase later with record_purchase closes them.",
+          "Put things on the buy list (e.g. 'we're low on napkins', 'get a new blender pitcher'). No count needed. Catalog items are saved with the catalog's spelling; anything else is saved as said and listed in notInCatalog — tell the user, in case one was meant to be a catalog item. Pass store if the user says where to get them; otherwise the inventory supplier is used. Items already open on the list are skipped. Logging the purchase later with record_purchase closes them.",
         inputSchema: z.object({
           items: z.array(z.string().min(1)).min(1).describe("Item names, e.g. ['napkins', 'dish soap']"),
+          store: z.string().optional().describe("Where to buy all of these, e.g. 'costco'. Leave out if not said."),
         }),
       },
-      async ({ items }) => {
+      async ({ items, store }) => {
         const [catalog, buyListRows] = await Promise.all([getCatalog(), getBuyListRows()]);
         const nameOf = (raw: string) => findCatalogItem(catalog, raw)?.item ?? raw.trim();
         const open = new Set(buyListRows.filter((r) => !r.done).map((r) => nameOf(r.item).toLowerCase()));
@@ -345,7 +346,7 @@ const mcpHandler = createMcpHandler(
           open.add(name.toLowerCase());
           if (!findCatalogItem(catalog, raw)) notInCatalog.push(name);
         }
-        if (added.length > 0) await addToBuyList(added, todayISO());
+        if (added.length > 0) await addToBuyList(added, todayISO(), store?.trim() ?? "");
         return result({ added, alreadyOnList, ...(notInCatalog.length > 0 && { notInCatalog }) });
       },
     );

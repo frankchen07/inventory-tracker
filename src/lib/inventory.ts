@@ -132,15 +132,15 @@ export async function getPurchases(): Promise<PurchaseRow[]> {
 
 export async function getBuyListRows(): Promise<BuyListRow[]> {
   const rows = await readRows(BUY_LIST_SHEET, BUY_LIST_HEADERS);
-  return rows.map((r) => ({ item: r.item, added: r.added, done: r.done.trim().toUpperCase() === "TRUE", rowIndex: r._rowIndex }));
+  return rows.map((r) => ({ item: r.item, store: r.store, added: r.added, done: r.done.trim().toUpperCase() === "TRUE", rowIndex: r._rowIndex }));
 }
 
 export async function addPurchases(rows: Record<(typeof PURCHASES_HEADERS)[number], string>[]): Promise<void> {
   await appendRows(PURCHASES_SHEET, PURCHASES_HEADERS, rows);
 }
 
-export async function addToBuyList(items: string[], date: string): Promise<void> {
-  await appendRows(BUY_LIST_SHEET, BUY_LIST_HEADERS, items.map((item) => ({ item, added: date, done: "" })));
+export async function addToBuyList(items: string[], date: string, store: string): Promise<void> {
+  await appendRows(BUY_LIST_SHEET, BUY_LIST_HEADERS, items.map((item) => ({ item, added: date, done: "", store })));
 }
 
 // Buying an item closes every open buy-list entry for it.
@@ -218,7 +218,7 @@ export function computeBuyList(
     const name = match?.item ?? row.item.trim();
     if (listed.has(name.toLowerCase())) continue;
     listed.add(name.toLowerCase());
-    list.handAdded.push({ item: name, supplier: match?.supplier ?? "", added: row.added, inCatalog: match !== undefined });
+    list.handAdded.push({ item: name, supplier: row.store.trim() || (match?.supplier ?? ""), added: row.added, inCatalog: match !== undefined });
   }
   return list;
 }
