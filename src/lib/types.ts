@@ -54,8 +54,8 @@ export interface MonthSpend {
   spend: number;
   runs: number;
   unpricedPurchases: number;
-  byStore: { store: string; spend: number; unpriced: number }[];
-  byItem: { item: string; spend: number; unpriced: number }[];
+  byStore: { store: string; spend: number; unpriced: number; lines: number; runs: number }[];
+  byItem: { item: string; spend: number; unpriced: number; quantities: string[] }[];
 }
 
 // "recipes" sheet: a batch process (brewing, roasting) and what it yields.

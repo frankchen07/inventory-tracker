@@ -132,14 +132,14 @@ test("computeMonthSpend totals the calendar month's receipt costs by store and i
   // costco 11-05 (either case), costco 11-12, costco 11-27, amazon 11-28.
   assert.equal(m.runs, 4);
   assert.deepEqual(m.byStore, [
-    { store: "costco", spend: 138, unpriced: 1 },
-    { store: "amazon", spend: 25, unpriced: 0 },
+    { store: "costco", spend: 138, unpriced: 1, lines: 4, runs: 3 },
+    { store: "amazon", spend: 25, unpriced: 0, lines: 1, runs: 1 },
   ]);
   assert.deepEqual(m.byItem, [
-    { item: "oat milk", spend: 120, unpriced: 0 },
-    { item: "blender pitcher", spend: 25, unpriced: 0 },
-    { item: "napkins", spend: 18, unpriced: 0 },
-    { item: "matcha", spend: 0, unpriced: 1 },
+    { item: "oat milk", spend: 120, unpriced: 0, quantities: ["6 boxes", "2 boxes"] },
+    { item: "blender pitcher", spend: 25, unpriced: 0, quantities: ["1"] },
+    { item: "napkins", spend: 18, unpriced: 0, quantities: ["1 pack"] },
+    { item: "matcha", spend: 0, unpriced: 1, quantities: ["1 bag"] },
   ]);
 });
 

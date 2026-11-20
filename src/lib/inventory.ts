@@ -270,22 +270,26 @@ export async function loadBuyList() {
 }
 
 // The calendar month's receipts. Lines with no cost entered are counted as
-// unpriced, not guessed.
+// unpriced, not guessed. Lines are taken in date order, so each item's
+// quantities read in the order they were bought.
 export function computeMonthSpend(catalog: CatalogItem[], purchases: PurchaseRow[], month: string): MonthSpend {
   const result: MonthSpend = { spend: 0, runs: 0, unpricedPurchases: 0, byStore: [], byItem: [] };
-  const stores = new Map<string, { store: string; spend: number; unpriced: number }>();
-  const items = new Map<string, { item: string; spend: number; unpriced: number }>();
+  const stores = new Map<string, { store: string; spend: number; unpriced: number; lines: number; days: Set<string> }>();
+  const items = new Map<string, { item: string; spend: number; unpriced: number; quantities: string[] }>();
   const runs = new Set<string>();
 
-  for (const p of purchases) {
-    if (!p.date.startsWith(month)) continue;
+  const inMonth = purchases.filter((p) => p.date.startsWith(month)).sort((a, b) => a.date.localeCompare(b.date));
+  for (const p of inMonth) {
     const storeKey = p.store.trim().toLowerCase();
     runs.add(`${p.date}|${storeKey}`);
     const name = findCatalogItem(catalog, p.item)?.item ?? p.item.trim();
-    const store = stores.get(storeKey) ?? { store: p.store.trim(), spend: 0, unpriced: 0 };
-    const line = items.get(name.toLowerCase()) ?? { item: name, spend: 0, unpriced: 0 };
+    const store = stores.get(storeKey) ?? { store: p.store.trim(), spend: 0, unpriced: 0, lines: 0, days: new Set<string>() };
+    const line = items.get(name.toLowerCase()) ?? { item: name, spend: 0, unpriced: 0, quantities: [] };
     stores.set(storeKey, store);
     items.set(name.toLowerCase(), line);
+    store.days.add(p.date);
+    store.lines++;
+    line.quantities.push(p.quantity.trim());
 
     if (p.cost === null) {
       result.unpricedPurchases++;
@@ -298,7 +302,11 @@ export function computeMonthSpend(catalog: CatalogItem[], purchases: PurchaseRow
     }
   }
   result.runs = runs.size;
-  result.byStore = [...stores.values()].sort((a, b) => b.spend - a.spend);
-  result.byItem = [...items.values()].sort((a, b) => b.spend - a.spend);
+  result.byStore = [...stores.values()]
+    .map(({ days, ...s }) => ({ ...s, runs: days.size }))
+    .sort((a, b) => b.spend - a.spend);
+  // Highest spend first; items with no priced line at all go last.
+  const unpricedOnly = (i: { unpriced: number; quantities: string[] }) => (i.unpriced === i.quantities.length ? 1 : 0);
+  result.byItem = [...items.values()].sort((a, b) => b.spend - a.spend || unpricedOnly(a) - unpricedOnly(b));
   return result;
 }
