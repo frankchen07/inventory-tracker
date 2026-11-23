@@ -73,7 +73,7 @@ export function BuyListBody({ view, sheetUrl }: { view: BuyListView; sheetUrl: s
             <section key={group.title}>
               <div className="flex items-baseline justify-between gap-3 pb-2">
                 <h2 className="text-xl font-bold">{group.title}</h2>
-                <span className="text-sm text-zinc-600">{group.status}</span>
+                <span className="text-sm font-bold text-zinc-600">{group.status}</span>
               </div>
               <ul>
                 {group.rows.map((row) => (

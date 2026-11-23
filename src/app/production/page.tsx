@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { Nav } from "@/app/nav";
 import { computeProductionPlan, RECIPE_UNIT_OZ } from "@/lib/production";
 import type { BatchRequirement, DemandLine, RefillLevel } from "@/lib/types";
 import { normalizeUnit } from "@/lib/unit-conversion";
@@ -211,113 +211,108 @@ export default async function ProductionPage() {
   const nothingToMake = toMake.length === 0 && plan.orderFills.length === 0 && plan.sheetProblems.length === 0;
 
   return (
-    <main className="mx-auto w-full max-w-[900px] px-4 pb-14 pt-7 text-[18px] leading-[1.35] text-zinc-900 tabular-nums">
-      <div className="flex flex-wrap items-start justify-between gap-4">
+    <>
+      <Nav current="production" />
+      <main className="mx-auto w-full max-w-[900px] px-4 pb-28 pt-7 text-[18px] leading-[1.35] text-zinc-900 tabular-nums lg:pb-14">
         <div>
           <h1 className="text-[28px] font-bold">Production</h1>
           <p className="mt-1 text-base text-zinc-600">
             Orders {formatDayLabel(plan.windowStart)}&ndash;{formatDayLabel(plan.windowEnd)}
           </p>
         </div>
-        <Link
-          href="/"
-          className="flex min-h-11 items-center rounded-md border border-zinc-300 px-4 text-base font-medium text-zinc-700 hover:bg-zinc-50"
-        >
-          Inventory dashboard
-        </Link>
-      </div>
 
-      <Step n={1} title="What's due">
-        {due.length === 0 && <p className="border-t border-zinc-200 py-3.5 text-zinc-600">Nothing due this week.</p>}
-        {due.map((row) => (
-          <DueRow key={row.key} when={row.when} who={row.who} what={row.what} />
-        ))}
-        {upcoming.length > 0 && (
-          <div className="mt-6 text-zinc-600">
-            <p className="mb-2 text-base">Next week, heads up</p>
-            {upcoming.map((row) => (
-              <DueRow key={row.key} when={row.when} who={row.who} what={row.what} />
-            ))}
-          </div>
-        )}
-      </Step>
-
-      <Step n={2} title="Take it from reserves">
-        {plan.reserveDraws.length === 0 ? (
-          <p className="border-t border-zinc-200 py-3.5 text-zinc-600">Nothing to take this week.</p>
-        ) : (
-          <table className="w-full border-collapse">
-            <thead>
-              <tr className="text-right text-[15px] text-zinc-600">
-                <th scope="col" className="py-1.5 text-left font-normal">Item</th>
-                <th scope="col" className="py-1.5 pl-3 font-normal">Have</th>
-                <th scope="col" className="py-1.5 pl-3 font-normal">Need</th>
-                <th scope="col" className="py-1.5 pl-3 font-normal">Left</th>
-              </tr>
-            </thead>
-            <tbody>
-              {plan.reserveDraws.map((d) => (
-                <tr key={d.item} className="border-t border-zinc-200 text-right">
-                  <td className="py-3.5 text-left font-bold first-letter:uppercase">{d.item}</td>
-                  <td className="whitespace-nowrap py-3.5 pl-3">{d.have === 0 ? "0" : amount(d.have, d.unit)}</td>
-                  <td className="whitespace-nowrap py-3.5 pl-3">{amount(d.need, d.unit)}</td>
-                  <td className={`whitespace-nowrap py-3.5 pl-3 ${d.short > 0 ? "font-bold text-red-700" : ""}`}>
-                    {d.short > 0 ? `Short ${amount(Math.max(0.1, d.short), d.unit)}` : amount(d.left, d.unit)}
-                  </td>
-                </tr>
+        <Step n={1} title="What's due">
+          {due.length === 0 && <p className="border-t border-zinc-200 py-3.5 text-zinc-600">Nothing due this week.</p>}
+          {due.map((row) => (
+            <DueRow key={row.key} when={row.when} who={row.who} what={row.what} />
+          ))}
+          {upcoming.length > 0 && (
+            <div className="mt-6 text-zinc-600">
+              <p className="mb-2 text-base">Next week, heads up</p>
+              {upcoming.map((row) => (
+                <DueRow key={row.key} when={row.when} who={row.who} what={row.what} />
               ))}
-            </tbody>
-          </table>
-        )}
-      </Step>
-
-      <Step n={3} title="Make what's short" hint="You need these to fill this week's orders.">
-        {nothingToMake && <p className="border-t border-zinc-200 py-3.5 text-zinc-600">Nothing short. Reserves cover every order.</p>}
-        {toMake.map((b) => (
-          <MakeRow key={b.recipe} label={makeLabel(b)} detail={makeDetail(b)} />
-        ))}
-        {plan.orderFills.map((f) => (
-          <MakeRow key={f.product} label={`Fill ${countOf(f.product, f.units)}`} detail={`uses ${f.recipeSource}`} />
-        ))}
-        {plan.sheetProblems.map((p) => (
-          <div key={p.item} className="border-t border-zinc-200 py-3.5">
-            <b className="block text-[21px] first-letter:uppercase">{p.item}</b>
-            <span className="text-base font-bold text-red-700">Can&apos;t plan this: it {p.problem}</span>
-          </div>
-        ))}
-      </Step>
-
-      {plan.refillLevels.length > 0 && (
-        <Step
-          n={4}
-          title="Refill reserves if you want"
-          hint="Where each reserve ends up after orders. Your call how much to refill."
-        >
-          {plan.refillLevels.map((r) => {
-            const { main, detail } = refillAction(r, plan.refillLevels);
-            return (
-              <div
-                key={r.entity}
-                className="grid grid-cols-1 items-center gap-x-5 gap-y-1.5 border-t border-zinc-200 py-3.5 sm:grid-cols-[1fr_1.2fr_auto]"
-              >
-                <b className="first-letter:uppercase">{r.entity}</b>
-                <div>
-                  <div className="h-4 overflow-hidden rounded bg-zinc-200">
-                    <div className="h-full bg-zinc-900" style={{ width: `${Math.min(100, (r.level / r.amt) * 100)}%` }} />
-                  </div>
-                  <div className="mt-1 text-base text-zinc-600">
-                    {roundDisplay(r.level)} of {amount(r.amt, r.amtUnit)}
-                  </div>
-                </div>
-                <div className="font-bold sm:min-w-[190px] sm:text-right">
-                  {main}
-                  {detail && <div className="text-base font-normal text-zinc-600">{detail}</div>}
-                </div>
-              </div>
-            );
-          })}
+            </div>
+          )}
         </Step>
-      )}
-    </main>
+
+        <Step n={2} title="Take it from reserves">
+          {plan.reserveDraws.length === 0 ? (
+            <p className="border-t border-zinc-200 py-3.5 text-zinc-600">Nothing to take this week.</p>
+          ) : (
+            <table className="w-full border-collapse">
+              <thead>
+                <tr className="text-right text-[15px] text-zinc-600">
+                  <th scope="col" className="py-1.5 text-left font-normal">Item</th>
+                  <th scope="col" className="py-1.5 pl-3 font-normal">Have</th>
+                  <th scope="col" className="py-1.5 pl-3 font-normal">Need</th>
+                  <th scope="col" className="py-1.5 pl-3 font-normal">Left</th>
+                </tr>
+              </thead>
+              <tbody>
+                {plan.reserveDraws.map((d) => (
+                  <tr key={d.item} className="border-t border-zinc-200 text-right">
+                    <td className="py-3.5 text-left font-bold first-letter:uppercase">{d.item}</td>
+                    <td className="whitespace-nowrap py-3.5 pl-3">{d.have === 0 ? "0" : amount(d.have, d.unit)}</td>
+                    <td className="whitespace-nowrap py-3.5 pl-3">{amount(d.need, d.unit)}</td>
+                    <td className={`whitespace-nowrap py-3.5 pl-3 ${d.short > 0 ? "font-bold text-red-700" : ""}`}>
+                      {d.short > 0 ? `Short ${amount(Math.max(0.1, d.short), d.unit)}` : amount(d.left, d.unit)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </Step>
+
+        <Step n={3} title="Make what's short" hint="You need these to fill this week's orders.">
+          {nothingToMake && <p className="border-t border-zinc-200 py-3.5 text-zinc-600">Nothing short. Reserves cover every order.</p>}
+          {toMake.map((b) => (
+            <MakeRow key={b.recipe} label={makeLabel(b)} detail={makeDetail(b)} />
+          ))}
+          {plan.orderFills.map((f) => (
+            <MakeRow key={f.product} label={`Fill ${countOf(f.product, f.units)}`} detail={`uses ${f.recipeSource}`} />
+          ))}
+          {plan.sheetProblems.map((p) => (
+            <div key={p.item} className="border-t border-zinc-200 py-3.5">
+              <b className="block text-[21px] first-letter:uppercase">{p.item}</b>
+              <span className="text-base font-bold text-red-700">Can&apos;t plan this: it {p.problem}</span>
+            </div>
+          ))}
+        </Step>
+
+        {plan.refillLevels.length > 0 && (
+          <Step
+            n={4}
+            title="Refill reserves if you want"
+            hint="Where each reserve ends up after orders. Your call how much to refill."
+          >
+            {plan.refillLevels.map((r) => {
+              const { main, detail } = refillAction(r, plan.refillLevels);
+              return (
+                <div
+                  key={r.entity}
+                  className="grid grid-cols-1 items-center gap-x-5 gap-y-1.5 border-t border-zinc-200 py-3.5 sm:grid-cols-[1fr_1.2fr_auto]"
+                >
+                  <b className="first-letter:uppercase">{r.entity}</b>
+                  <div>
+                    <div className="h-4 overflow-hidden rounded bg-zinc-200">
+                      <div className="h-full bg-zinc-900" style={{ width: `${Math.min(100, (r.level / r.amt) * 100)}%` }} />
+                    </div>
+                    <div className="mt-1 text-base text-zinc-600">
+                      {roundDisplay(r.level)} of {amount(r.amt, r.amtUnit)}
+                    </div>
+                  </div>
+                  <div className="font-bold sm:min-w-[190px] sm:text-right">
+                    {main}
+                    {detail && <div className="text-base font-normal text-zinc-600">{detail}</div>}
+                  </div>
+                </div>
+              );
+            })}
+          </Step>
+        )}
+      </main>
+    </>
   );
 }

@@ -23,14 +23,14 @@ test("AC-1: headline counts to-buy items and bought items", () => {
     handAdded: [hand("trash bags"), hand("paper towels"), hand("q-tip pads", "target")],
     needsReview: [],
   };
-  assert.equal(buildBuyListView(list, "2026-11-10", "2026-11-12").headline, "12 to buy · 2 already bought");
+  assert.equal(buildBuyListView(list, "2026-11-10", "2026-11-12").headline, "12 items to buy · 2 items already bought");
 });
 
 test("AC-2: headline drops the bought part when nothing is bought, and an empty list has no groups", () => {
   const list: BuyList = { ...empty, low: [low("ice", "costco")] };
-  assert.equal(buildBuyListView(list, "2026-11-10", "2026-11-12").headline, "1 to buy");
+  assert.equal(buildBuyListView(list, "2026-11-10", "2026-11-12").headline, "1 item to buy");
   const view = buildBuyListView(empty, "2026-11-10", "2026-11-12");
-  assert.equal(view.headline, "0 to buy");
+  assert.equal(view.headline, "0 items to buy");
   assert.deepEqual(view.groups, []);
 });
 
@@ -69,8 +69,8 @@ test("AC-6: items group by supplier case-insensitively, with status and a no-sup
   assert.deepEqual(
     groups.map((g) => [g.title, g.status, g.rows.length]),
     [
-      ["Costco", "1 to buy", 2],
-      ["No supplier yet", "1 to buy", 1],
+      ["Costco", "1 item to buy", 2],
+      ["No supplier yet", "1 item to buy", 1],
       ["Amazon", "all bought", 1],
     ],
   );
@@ -135,11 +135,11 @@ test("AC-10: a bought row lists its purchases in date order", () => {
   });
 });
 
-test("AC-11: a hand-added row says by hand, when added, and whether it's in inventory", () => {
+test("AC-11: a hand-added row says a la carte, when added, and whether it's in inventory", () => {
   const list: BuyList = { ...empty, handAdded: [hand("trash bags", "", false), hand("q-tip pads", "target", true)] };
   const groups = buildBuyListView(list, "2026-11-10", "2026-11-18").groups;
-  assert.deepEqual(groups[0].rows[0], { item: "Q-tip pads", right: "by hand", note: "Added Nov 18", kind: "hand" });
-  assert.deepEqual(groups[1].rows[0], { item: "Trash bags", right: "by hand", note: "Added Nov 18 · not in inventory", kind: "hand" });
+  assert.deepEqual(groups[0].rows[0], { item: "Q-tip pads", right: "a la carte", note: "Added Nov 18", kind: "hand" });
+  assert.deepEqual(groups[1].rows[0], { item: "Trash bags", right: "a la carte", note: "Added Nov 18 · not in inventory", kind: "hand" });
 });
 
 test("AC-7: all-bought groups sort alphabetically by title, including a no-supplier one", () => {

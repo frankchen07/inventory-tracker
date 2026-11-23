@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-type Section = "buy" | "months";
+type Section = "buy" | "months" | "production";
 
 const ICON = {
   width: 22,
@@ -14,7 +14,7 @@ const ICON = {
   "aria-hidden": true,
 } as const;
 
-const LINKS: { href: string; label: string; section: Section | null; icon: React.ReactNode }[] = [
+const LINKS: { href: string; label: string; section: Section; icon: React.ReactNode }[] = [
   {
     href: "/",
     label: "Buy list",
@@ -39,7 +39,7 @@ const LINKS: { href: string; label: string; section: Section | null; icon: React
   {
     href: "/production",
     label: "Production",
-    section: null,
+    section: "production",
     icon: (
       <svg {...ICON}>
         <path d="M4 20V10l5 3V10l5 3V6h6v14z" />

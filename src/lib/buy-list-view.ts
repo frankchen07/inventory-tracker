@@ -27,6 +27,8 @@ export interface BuyListView {
 const NO_SUPPLIER = "No supplier yet";
 const ORDER: Record<BuyRow["kind"], number> = { low: 0, hand: 1, bought: 2 };
 
+const items = (n: number) => `${n} ${n === 1 ? "item" : "items"}`;
+
 function ago(days: number): string {
   if (days === 0) return "today";
   return days === 1 ? "1 day ago" : `${days} days ago`;
@@ -55,7 +57,7 @@ export function buildBuyListView(list: BuyList, latestDate: string | null, today
   }
   for (const h of list.handAdded) {
     const note = `Added ${shortDate(h.added)}${h.inCatalog ? "" : " · not in inventory"}`;
-    add(h.supplier, { item: displayName(h.item), right: "by hand", note, kind: "hand" });
+    add(h.supplier, { item: displayName(h.item), right: "a la carte", note, kind: "hand" });
   }
 
   const toBuy = (rows: BuyRow[]) => rows.filter((r) => r.kind !== "bought").length;
@@ -68,7 +70,7 @@ export function buildBuyListView(list: BuyList, latestDate: string | null, today
 
   const allRows = ordered.flatMap(([, g]) => g.rows);
   const boughtCount = allRows.length - toBuy(allRows);
-  const headline = `${toBuy(allRows)} to buy${boughtCount > 0 ? ` · ${boughtCount} already bought` : ""}`;
+  const headline = `${items(toBuy(allRows))} to buy${boughtCount > 0 ? ` · ${items(boughtCount)} already bought` : ""}`;
 
   let banner: BuyListView["banner"] = null;
   let lastCount: string | null = null;
@@ -90,7 +92,7 @@ export function buildBuyListView(list: BuyList, latestDate: string | null, today
     groups: ordered.map(([, g]) => {
       const rows = [...g.rows].sort((a, b) => ORDER[a.kind] - ORDER[b.kind]);
       const n = toBuy(rows);
-      return { title: g.title, status: n > 0 ? `${n} to buy` : "all bought", rows };
+      return { title: g.title, status: n > 0 ? `${items(n)} to buy` : "all bought", rows };
     }),
     needsReview: list.needsReview.map((r) => ({ item: displayName(r.item), problem: r.problem })),
   };

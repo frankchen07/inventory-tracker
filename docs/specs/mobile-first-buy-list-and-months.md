@@ -1,6 +1,6 @@
 # Spec: Mobile-first buy list and months
 
-Status: built, clean after 3 rounds
+Status: built, clean after 3 rounds; revised 2026-11-22 (see Revisions)
 Date: 2026-11-18
 
 ## Goal
@@ -45,15 +45,15 @@ Rebuild `/` and `/month` mobile-first. Months become a list with totals that you
 ## Acceptance criteria
 
 ### Buy list `/`
-- **AC-1:** Given 9 to-buy low items, 3 hand-added items and 2 bought items, when `/` loads, then the line under the "Buy list" heading reads `12 to buy · 2 already bought`.
-- **AC-2:** Given 0 bought items, when `/` loads, then that line reads `<N> to buy` with no "already bought" part.
-  - Given no low and no hand-added items, it reads `0 to buy`, and the page shows `Nothing to buy right now.` with no store groups.
+- **AC-1:** Given 9 to-buy low items, 3 hand-added items and 2 bought items, when `/` loads, then the line under the "Buy list" heading reads `12 items to buy · 2 items already bought`. A count of 1 says `item`, any other count says `items`.
+- **AC-2:** Given 0 bought items, when `/` loads, then that line reads `<N> items to buy` (or `1 item to buy`) with no "already bought" part.
+  - Given no low and no hand-added items, it reads `0 items to buy`, and the page shows `Nothing to buy right now.` with no store groups.
 - **AC-3:** Given the latest count date is stale, when `/` loads, then a banner shows `Last count <short date>, <N> days ago` and `Time to count.`
 - **AC-4:** Given the latest count date is not stale, when `/` loads, then there is no banner. A muted line shows `Last count <short date> (<today | 1 day ago | N days ago>)`.
 - **AC-5:** Given no counts recorded at all, when `/` loads, then the banner shows `No counts recorded yet.`
 - **AC-6:** Given items from several suppliers, when `/` loads, then items are grouped by supplier, matched case-insensitively.
   - Each group heading shows the supplier's display name.
-  - On the right it shows `<N> to buy`, or `all bought` when every item in the group is bought.
+  - On the right, in bold, it shows `<N> items to buy` (`1 item to buy`), or `all bought` when every item in the group is bought.
   - Items with a blank supplier go in a group headed `No supplier yet`.
 - **AC-7:** Given a mix of groups, when `/` loads, then groups appear in this order:
   1. Groups with at least one to-buy item: named suppliers alphabetically, case-insensitive, then `No supplier yet`.
@@ -68,7 +68,7 @@ Rebuild `/` and `/month` mobile-first. Months become a list with totals that you
 - **AC-10:** Given a bought item, when `/` loads, then its row shows a check icon (aria-hidden), the name in muted text and the count text on the right.
   - A second line reads `Bought <short date> · <quantity>`.
   - Several purchases are joined with `, `, in date order.
-- **AC-11:** Given a hand-added item, when `/` loads, then its row shows `by hand` on the right.
+- **AC-11:** Given a hand-added item, when `/` loads, then its row shows `a la carte` on the right.
   - A second line reads `Added <short date>`, followed by ` · not in inventory` when it isn't in the catalog.
 - **AC-12:** Given `needsReview` has entries, when `/` loads, then a section headed `Needs review (<N>)` with the text `Fix these in the sheet.` lists each item with its problem text. It sits after all store groups.
 - **AC-13:** Given any state, when `/` loads, then the last content element is an `Open Google Sheet` link.
@@ -105,9 +105,9 @@ Rebuild `/` and `/month` mobile-first. Months become a list with totals that you
 - **AC-27:** Given `/month/2026-13`, `/month/abc` or `/month/2026-1`, when requested, then it redirects to `/month`.
 
 ### Navigation and layout
-- **AC-28:** Given a mobile viewport on `/`, `/month` or `/month/<m>`, then a tab bar is fixed to the bottom of the viewport.
+- **AC-28:** Given a mobile viewport on `/`, `/month`, `/month/<m>` or `/production`, then a tab bar is fixed to the bottom of the viewport.
   - Its links are `Buy list` (`/`), `Months` (`/month`) and `Production` (`/production`).
-  - The current section's link has `aria-current="page"`. Months counts as current on month detail.
+  - The current section's link has `aria-current="page"`. Months counts as current on month detail; Production is current on `/production`.
   - Scrolled to the bottom, the last content element is fully visible above the bar.
 - **AC-29:** Given a desktop viewport on those pages, then the same three links appear in a bar at the top, and no bottom bar shows.
 - **AC-30:** Given a 360px-wide viewport and the seeded data, then none of the three pages scrolls horizontally: `document.documentElement.scrollWidth` ≤ 360.
@@ -116,10 +116,10 @@ Rebuild `/` and `/month` mobile-first. Months become a list with totals that you
   - The buy list's store groups lay out in 2 columns.
   - On month detail, `By store` and `What was bought` sit side by side.
   - The months list stays a single column no wider than 720px.
-- **AC-33:** Given the build is done, then `src/app/production/` and `src/app/login/` have no changes.
+- **AC-33:** Given the build is done, then `src/app/login/` has no changes, and `src/app/production/` changes only to add the tab bar, pad its content clear of it, and drop its old "Inventory dashboard" button.
 
 ## Out of scope
-- Restyling `/production` or `/login`.
+- Restyling `/production` (beyond adding the tab bar) or `/login`.
 - MCP tools, the sheet schema and any sheet writes.
 - Showing thresholds on the buy list.
 - Checking items off or editing anything from the app.
@@ -140,6 +140,13 @@ Rebuild `/` and `/month` mobile-first. Months become a list with totals that you
 
 ## Open questions
 None.
+
+## Revisions
+- 2026-11-22 (frank, after using the preview):
+  - The tab bar now shows on `/production` too, so it's easy to get back (AC-28, AC-33). Its old "Inventory dashboard" button is gone, since the bar replaces it.
+  - Counts say `items`: `12 items to buy · 2 items already bought`, `9 items to buy`, `1 item to buy` (AC-1, AC-2, AC-6).
+  - The per-store count is bold (AC-6).
+  - Hand-added rows say `a la carte` instead of `by hand` (AC-11).
 
 ## Build log
 <!-- looper-build-review appends rounds here -->

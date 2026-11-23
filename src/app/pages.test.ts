@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { BuyListBody } from "@/app/buy-list-body";
 import { MonthDetailBody } from "@/app/month/month-detail-body";
 import { MonthsBody } from "@/app/month/months-body";
+import { Nav } from "@/app/nav";
 import { buildBuyListView } from "@/lib/buy-list-view";
 import type { MonthDetail, MonthRow } from "@/lib/months";
 import type { BuyList } from "@/lib/types";
@@ -64,7 +65,7 @@ test("AC-21: a Months back link to /month sits above the month heading", () => {
 
 test("AC-2: an empty buy list says nothing to buy, with no store groups", () => {
   const html = buyListHtml({ low: [], handAdded: [], needsReview: [] });
-  assert.ok(html.includes(">0 to buy<"));
+  assert.ok(html.includes(">0 items to buy<"));
   assert.ok(html.includes("Nothing to buy right now."));
   assert.ok(!html.includes("<section"), "no store groups");
 });
@@ -126,4 +127,17 @@ test("AC-26: an empty month shows $0 and nothing logged, with no sections", () =
   assert.ok(html.includes("Nothing logged this month."));
   assert.ok(!html.includes("By store"));
   assert.ok(!html.includes("What was bought"));
+});
+
+test("AC-6: a store group's count of items to buy is bold, with a plural for more than one", () => {
+  const two: BuyList = { ...list, low: [...list.low, { ...list.low[0], item: "12 oz hot lid" }] };
+  assert.match(buyListHtml(list), /<span class="[^"]*font-bold[^"]*">1 item to buy<\/span>/);
+  assert.match(buyListHtml(two), /<span class="[^"]*font-bold[^"]*">2 items to buy<\/span>/);
+});
+
+test("AC-28: the tab bar marks Production as the current page on /production", () => {
+  const html = renderToStaticMarkup(createElement(Nav, { current: "production" }));
+  const link = html.match(/<a [^>]*href="\/production"[^>]*>/);
+  assert.ok(link?.[0].includes('aria-current="page"'));
+  assert.equal(html.match(/aria-current/g)?.length, 1);
 });
