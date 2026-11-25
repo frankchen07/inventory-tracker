@@ -49,7 +49,7 @@ Rebuild `/` and `/month` mobile-first. Months become a list with totals that you
 - **AC-2:** Given 0 bought items, when `/` loads, then that line reads `<N> items to buy` (or `1 item to buy`) with no "already bought" part.
   - Given no low and no hand-added items, it reads `0 items to buy`, and the page shows `Nothing to buy right now.` with no store groups.
 - **AC-3:** Given the latest count date is stale, when `/` loads, then a banner shows `Last count <short date>, <N> days ago` and `Time to count.`
-- **AC-4:** Given the latest count date is not stale, when `/` loads, then there is no banner. A muted line shows `Last count <short date> (<today | 1 day ago | N days ago>)`.
+- **AC-4:** Given the latest count date is not stale, when `/` loads, then there is no banner. A muted line shows `Last count <short date> (<today | 1 day ago | N days ago | dated in the future>)`.
 - **AC-5:** Given no counts recorded at all, when `/` loads, then the banner shows `No counts recorded yet.`
 - **AC-6:** Given items from several suppliers, when `/` loads, then items are grouped by supplier, matched case-insensitively.
   - Each group heading shows the supplier's display name.
@@ -69,7 +69,7 @@ Rebuild `/` and `/month` mobile-first. Months become a list with totals that you
   - A second line reads `Bought <short date> · <quantity>`.
   - Several purchases are joined with `, `, in date order.
 - **AC-11:** Given a hand-added item, when `/` loads, then its row shows `a la carte` on the right.
-  - A second line reads `Added <short date>`, followed by ` · not in inventory` when it isn't in the catalog.
+  - A second line reads `Added <short date>`, followed by ` · not in inventory` when it isn't in the catalog. A blank date drops the `Added` part (leaving `Not in inventory` or no line); a date that isn't a real YYYY-MM-DD day is shown as typed.
 - **AC-12:** Given `needsReview` has entries, when `/` loads, then a section headed `Needs review (<N>)` with the text `Fix these in the sheet.` lists each item with its problem text. It sits after all store groups.
 - **AC-13:** Given any state, when `/` loads, then the last content element is an `Open Google Sheet` link.
   - It points at the spreadsheet's `/edit` URL with `target="_blank"` and `rel="noopener noreferrer"`.
@@ -147,6 +147,9 @@ None.
   - Counts say `items`: `12 items to buy · 2 items already bought`, `9 items to buy`, `1 item to buy` (AC-1, AC-2, AC-6).
   - The per-store count is bold (AC-6).
   - Hand-added rows say `a la carte` instead of `by hand` (AC-11).
+- 2026-11-24 (frank: "fix anything else"):
+  - A count dated after today reads `Last count <short date> (dated in the future)` (AC-4).
+  - A hand-added row with a blank date drops the `Added` part; a date that isn't YYYY-MM-DD is shown as typed (AC-11).
 
 ## Build log
 <!-- looper-build-review appends rounds here -->

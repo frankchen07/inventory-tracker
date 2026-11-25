@@ -15,8 +15,11 @@ export function addDays(date: string, days: number): string {
   return isoDate(d);
 }
 
+// Anything that isn't a real YYYY-MM-DD day (11/24/2026) is shown as typed.
 export function shortDate(date: string): string {
-  return parseDate(date).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  const d = parseDate(date);
+  if (isoDate(d) !== date) return date;
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
 // Rounded, since a span crossing a DST change is an hour off a whole day.

@@ -14,3 +14,7 @@ test("shortDate reads like a calendar day", () => {
   assert.equal(shortDate("2026-10-15"), "Oct 15");
   assert.equal(shortDate("2026-03-01"), "Mar 1");
 });
+
+test("shortDate shows anything that isn't a real YYYY-MM-DD day as typed", () => {
+  for (const typed of ["11/24/2026", "11-24-2026", "2026-13-45", "2026-02-30", "soon"]) assert.equal(shortDate(typed), typed);
+});

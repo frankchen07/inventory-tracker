@@ -30,6 +30,7 @@ const ORDER: Record<BuyRow["kind"], number> = { low: 0, hand: 1, bought: 2 };
 const items = (n: number) => `${n} ${n === 1 ? "item" : "items"}`;
 
 function ago(days: number): string {
+  if (days < 0) return "dated in the future";
   if (days === 0) return "today";
   return days === 1 ? "1 day ago" : `${days} days ago`;
 }
@@ -56,7 +57,8 @@ export function buildBuyListView(list: BuyList, latestDate: string | null, today
     }
   }
   for (const h of list.handAdded) {
-    const note = `Added ${shortDate(h.added)}${h.inCatalog ? "" : " · not in inventory"}`;
+    const notes = [h.added.trim() && `Added ${shortDate(h.added)}`, !h.inCatalog && "not in inventory"].filter(Boolean);
+    const note = notes.length > 0 ? displayName(notes.join(" · ")) : null;
     add(h.supplier, { item: displayName(h.item), right: "a la carte", note, kind: "hand" });
   }
 

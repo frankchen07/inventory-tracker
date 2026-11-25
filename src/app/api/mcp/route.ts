@@ -365,7 +365,14 @@ const mcpHandler = createMcpHandler(
       },
     );
   },
-  { serverInfo: { name: "inventory-tracker", version: "0.1.0" } },
+  {
+    serverInfo: { name: "inventory-tracker", version: "0.1.0" },
+    // The tools never change while deployed. By default the SDK offers change
+    // notices, and a client listening for them holds a request open until
+    // Vercel times it out.
+    capabilities: { tools: { listChanged: false } },
+    maxSubscriptions: 0,
+  },
 );
 
 function isAuthorized(request: Request): boolean {

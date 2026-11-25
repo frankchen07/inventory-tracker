@@ -49,6 +49,12 @@ test("AC-4: a fresh latest count shows a muted last-count line and no banner", (
   assert.equal(view.banner, null);
 });
 
+test("AC-4: a latest count dated after today says so", () => {
+  const view = buildBuyListView(empty, "2026-11-25", "2026-11-18");
+  assert.equal(view.lastCount, "Last count Nov 25 (dated in the future)");
+  assert.equal(view.banner, null);
+});
+
 test("AC-5: no counts at all shows the no-counts banner", () => {
   const view = buildBuyListView(empty, null, "2026-11-18");
   assert.deepEqual(view.banner, { title: "No counts recorded yet.", detail: null });
@@ -140,6 +146,14 @@ test("AC-11: a hand-added row says a la carte, when added, and whether it's in i
   const groups = buildBuyListView(list, "2026-11-10", "2026-11-18").groups;
   assert.deepEqual(groups[0].rows[0], { item: "Q-tip pads", right: "a la carte", note: "Added Nov 18", kind: "hand" });
   assert.deepEqual(groups[1].rows[0], { item: "Trash bags", right: "a la carte", note: "Added Nov 18 · not in inventory", kind: "hand" });
+});
+
+test("AC-11: a hand-added row with a blank or hand-typed date never says Invalid Date", () => {
+  const note = (added: string, inCatalog: boolean) =>
+    buildBuyListView({ ...empty, handAdded: [hand("trash bags", "", inCatalog, added)] }, "2026-11-10", "2026-11-18").groups[0].rows[0].note;
+  assert.equal(note("", true), null);
+  assert.equal(note(" ", false), "Not in inventory");
+  assert.equal(note("11/24/2026", false), "Added 11/24/2026 · not in inventory");
 });
 
 test("AC-7: all-bought groups sort alphabetically by title, including a no-supplier one", () => {
